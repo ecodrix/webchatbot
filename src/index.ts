@@ -15,6 +15,8 @@
  *   widget → frame  OPEN                           the visitor opened the chat
  *                                                  (again on CONFIG if already
  *                                                  open): the frame goes live
+ *   widget → frame  CLOSE                          the chat was hidden: replies
+ *                                                  no longer count as read
  *   widget → frame  PAGE { path, title }           on open, on CONFIG and on
  *                                                  popstate/hashchange; path
  *                                                  only (no query or hash)
@@ -436,6 +438,8 @@ export class ECODrIxWidget {
     // Closing from inside the chat (Esc / close button) must not drop focus.
     if (document.activeElement === this.iframe) this.bubble?.focus();
     document.documentElement.removeAttribute("data-ecodrix-open");
+    // The frame reports replies read only while the chat is on screen.
+    if (this.isOpen) this.post({ type: "CLOSE" });
     this.isOpen = false;
     this.iframe.style.opacity = "0";
     this.iframe.style.transform = "scale(0.8) translateY(20px)";

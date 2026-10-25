@@ -183,6 +183,17 @@ describe("OPEN and PAGE to the frame", () => {
     expect(sent("OPEN")).toHaveLength(2);
   });
 
+  it("CLOSE when an open chat is hidden (replies stop counting as read), to the frame's origin", async () => {
+    const { sent } = await loadAndSpy();
+    widget().hide();
+    expect(sent("CLOSE")).toHaveLength(0);
+    widget().show();
+    widget().hide();
+    expect(sent("CLOSE")).toEqual([[{ type: "CLOSE" }, FRAME_ORIGIN]]);
+    widget().hide();
+    expect(sent("CLOSE")).toHaveLength(1);
+  });
+
   it("opened before the frame was ready: OPEN again when its CONFIG arrives", async () => {
     const { sent } = await loadAndSpy();
     widget().show();

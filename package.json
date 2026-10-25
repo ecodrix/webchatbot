@@ -1,6 +1,6 @@
 {
   "name": "@ecodrix/chatbot",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "ECODrIx Chatbot SDK - lightweight widget, CDN + React/Next.js, TypeScript",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
