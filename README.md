@@ -40,7 +40,7 @@ Paste this before `</body>`, with your client code (Settings → Developer, or
 Connect → Website chat):
 
 ```html
-<script src="https://cdn.ecodrix.com/chatbot/v2.js" data-erix="CLIENT_CODE" async></script>
+<script src="https://cdn.jsdelivr.net/npm/@ecodrix/chatbot@2/dist/index.global.js" data-erix="CLIENT_CODE" async></script>
 ```
 
 The widget starts itself. Its name, greeting, colour, side (left/right), logo
@@ -48,23 +48,22 @@ and business hours come from your Website chat settings in ECODrIx, so you
 never edit the tag to change them. The bubble stays hidden until those
 settings arrive (at most 3 seconds), so it never shows the wrong colour.
 
-`v2.js` always serves the latest 2.x release. To pin a version, use the
-versioned file with its integrity hash (shown under "Pinned version" in
-Connect → Website chat) and update the tag yourself to get fixes:
+`@2` always serves the latest 2.x release from npm (jsDelivr refreshes a new
+release within about 12 hours). To pin a version, use the exact version with
+its integrity hash and update the tag yourself to get fixes. For 2.1.0:
 
 ```html
 <script
-  src="https://cdn.ecodrix.com/chatbot/v2.N.M.js"
-  integrity="sha384-…"
+  src="https://cdn.jsdelivr.net/npm/@ecodrix/chatbot@2.1.0/dist/index.global.js"
+  integrity="sha384-vV4MKRnFcty5p7WSuSmuenJDCv+vnRFDFdIUju91C0V3pXU9Uoc/C+S7S/GhGh1b"
   crossorigin="anonymous"
   data-erix="CLIENT_CODE"
   async
 ></script>
 ```
 
-The same build is on npm CDNs as `dist/index.global.js` (for example
-`https://cdn.jsdelivr.net/npm/@ecodrix/chatbot@2/dist/index.global.js`), and
-`data-erix` works there too.
+The hash for a release: `curl -s <that URL> | openssl dgst -sha384 -binary | openssl base64 -A`.
+The same file is on any npm CDN as `dist/index.global.js`.
 
 ### 🧩 Basic Usage
 
@@ -240,7 +239,7 @@ export default {
     <title>My Site</title>
   </head>
   <body>
-    <script src="https://cdn.ecodrix.com/chatbot/v2.js" data-erix="CLIENT_CODE" async></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ecodrix/chatbot@2/dist/index.global.js" data-erix="CLIENT_CODE" async></script>
   </body>
 </html>
 ```
