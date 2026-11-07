@@ -26,11 +26,7 @@
  */
 
 /** Bubble screen position. */
-export type BubblePosition =
-  | "bottom-left"
-  | "bottom-right"
-  | "top-left"
-  | "top-right";
+export type BubblePosition = "bottom-left" | "bottom-right" | "top-left" | "top-right";
 
 /** Configuration for the ECODrIx chat widget. */
 export interface ECODrIxWidgetConfig {
@@ -170,19 +166,13 @@ export class ECODrIxWidget {
     // bubble, one iframe.
     if (this.listeners) return;
     if (!this.config.botUrl) {
-      throw new Error(
-        "[ECODrIx] Provide `clientCode` (recommended) or `botUrl`.",
-      );
+      throw new Error("[ECODrIx] Provide `clientCode` (recommended) or `botUrl`.");
     }
     this.listeners = new AbortController();
     const on = { signal: this.listeners.signal };
     window.addEventListener("message", (e) => this.onFrameMessage(e), on);
     window.addEventListener("resize", () => this.updateDimensions(), on);
-    window.addEventListener(
-      "orientationchange",
-      () => this.updateDimensions(),
-      on,
-    );
+    window.addEventListener("orientationchange", () => this.updateDimensions(), on);
     // A single-page site moved on: the chat gets the new page.
     // ponytail: history.pushState fires no event, so an SPA's in-app link
     // while the chat is open isn't seen (PAGE is re-sent on every open) —
@@ -201,10 +191,7 @@ export class ECODrIxWidget {
     this.configTimeout = setTimeout(() => this.reveal(), CONFIG_TIMEOUT_MS);
 
     if (this.config.autoOpen > 0) {
-      this.autoOpenTimeout = setTimeout(
-        () => this.showIframe(),
-        this.config.autoOpen * 1000,
-      );
+      this.autoOpenTimeout = setTimeout(() => this.showIframe(), this.config.autoOpen * 1000);
     }
   }
 
@@ -652,8 +639,7 @@ export const ECODrIx: ECODrIxGlobal = {
   hide: () => activeWidget?.hideIframe(),
   toggle: () => activeWidget?.toggleIframe(),
   isOpen: () => activeWidget?.isIframeVisible() ?? false,
-  updateConfig: (opts: Partial<ECODrIxWidgetConfig>) =>
-    activeWidget?.updateConfig(opts),
+  updateConfig: (opts: Partial<ECODrIxWidgetConfig>) => activeWidget?.updateConfig(opts),
 };
 
 // CDN / global attach — the side effect the `<script>` embed relies on. A

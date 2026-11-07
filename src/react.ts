@@ -8,10 +8,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import {
-  ECODrIxChat as ECODrIxWidget,
-  type ECODrIxWidgetConfig,
-} from "./index.js";
+import { ECODrIxChat as ECODrIxWidget, type ECODrIxWidgetConfig } from "./index.js";
 
 /** Props for {@link ECODrIxChat} — every widget config field. */
 export type ECODrIxChatProps = ECODrIxWidgetConfig;
@@ -63,9 +60,7 @@ export function ECODrIxChat(props: ECODrIxChatProps): null {
 /**
  * Imperative hook — mounts the widget and returns programmatic controls.
  */
-export function useECODrIxChat(
-  config: ECODrIxWidgetConfig,
-): ECODrIxChatControls {
+export function useECODrIxChat(config: ECODrIxWidgetConfig): ECODrIxChatControls {
   const widgetRef = useRef<ECODrIxWidget | null>(null);
 
   useEffect(() => {

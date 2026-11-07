@@ -26,8 +26,7 @@ async function load(script?: { erix?: string }) {
   return mod;
 }
 
-const bubbles = () =>
-  document.querySelectorAll<HTMLElement>("[data-ecodrix-bubble]");
+const bubbles = () => document.querySelectorAll<HTMLElement>("[data-ecodrix-bubble]");
 const bubble = () => bubbles()[0];
 const container = () => bubble().parentElement as HTMLElement;
 const iframe = () => document.querySelector("iframe") as HTMLIFrameElement;
@@ -208,7 +207,9 @@ describe("phone sheet", () => {
     await load({ erix: "ACME" });
     const css = document.getElementById("ecodrix-widget-styles")?.textContent ?? "";
     expect(css).toMatch(/@media \(max-width: 480px\)/);
-    expect(css).toMatch(/html\[data-ecodrix-open\], html\[data-ecodrix-open\] body \{\s*overflow: hidden !important;/);
+    expect(css).toMatch(
+      /html\[data-ecodrix-open\], html\[data-ecodrix-open\] body \{\s*overflow: hidden !important;/,
+    );
     expect(css).toMatch(/top: env\(safe-area-inset-top, 0px\) !important;/);
     expect(css).toMatch(/left: env\(safe-area-inset-left, 0px\) !important;/);
     expect(iframe().hasAttribute("data-ecodrix-frame")).toBe(true);
@@ -227,10 +228,12 @@ describe("phone sheet", () => {
     await load({ erix: "ACME" });
     const sheet = document.getElementById("ecodrix-widget-styles") as HTMLStyleElement;
     const media = [...(sheet.sheet?.cssRules ?? [])].find(
-      (r): r is CSSMediaRule => r instanceof CSSMediaRule && /max-width: 480px/.test(r.conditionText),
+      (r): r is CSSMediaRule =>
+        r instanceof CSSMediaRule && /max-width: 480px/.test(r.conditionText),
     );
     const rule = [...(media?.cssRules ?? [])].find(
-      (r): r is CSSStyleRule => r instanceof CSSStyleRule && r.selectorText.includes("iframe[data-ecodrix-frame]"),
+      (r): r is CSSStyleRule =>
+        r instanceof CSSStyleRule && r.selectorText.includes("iframe[data-ecodrix-frame]"),
     );
     if (!rule) throw new Error("no phone-sheet rule");
     const width = rule.style.getPropertyValue("width");
