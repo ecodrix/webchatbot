@@ -43,14 +43,24 @@ Connect → Website chat):
 <script src="https://cdn.jsdelivr.net/npm/@ecodrix/chatbot@2/dist/index.global.js" data-erix="CLIENT_CODE" async></script>
 ```
 
-The widget starts itself. Its name, greeting, colour, side (left/right), logo
-and business hours come from your Website chat settings in ECODrIx, so you
-never edit the tag to change them. The bubble stays hidden until those
-settings arrive (at most 3 seconds), so it never shows the wrong colour.
+The widget starts itself. Everything about its look comes from your Website
+chat settings in ECODrIx (Channels › Website chat › Look), so you never edit
+the tag to change it: the button's shape (round, rounded square, or with
+words), icon, size, colour, corner and distance from the edges, a welcome
+nudge, pages where the chat stays away, and the chat window's name,
+greeting, theme and quick replies. The button stays hidden until those
+settings arrive (at most 3 seconds), so it never shows the wrong look.
+
+**Your own button.** Any element with `data-erix-open` opens the chat. Turn on
+"Use your own button" in Look to hide the floating button:
+
+```html
+<a href="#" data-erix-open>Book a visit</a>
+```
 
 `@2` always serves the latest 2.x release from npm (jsDelivr refreshes a new
 release within about 12 hours). To pin a version, use the exact version with
-its integrity hash and update the tag yourself to get fixes. For 2.1.0:
+its integrity hash and update the tag yourself to get fixes. For example, 2.1.0:
 
 ```html
 <script
@@ -149,22 +159,27 @@ ECODrIx.destroy(); // Remove the widget completely
 | **botUrl**             | `string`                                                       | —                                     | Explicit iframe URL _(advanced; optional when `clientCode` is set)_                                 |
 | **onOpen**             | `() => void`                                                   | —                                     | Called when the chat window opens                                                                   |
 | **onClose**            | `() => void`                                                   | —                                     | Called when the chat window closes                                                                  |
-| **bubbleIcon**         | `string`                                                       | `"💬"`                                | Emoji, SVG string, or image URL                                                                     |
-| **bubbleColor**        | `string`                                                       | `"#2b4dcb"`                           | Base color for the chat bubble                                                                      |
-| **iconColor**          | `string`                                                       | `"#ffffff"`                           | Color for icon inside bubble                                                                        |
-| **pulseColor**         | `string`                                                       | `"#34d399"`                           | Pulse/ripple effect color                                                                           |
-| **tooltipText**        | `string`                                                       | `"Chat with us!"`                     | Hover tooltip text                                                                                  |
-| **tooltipColor**       | `string`                                                       | `"#333333"`                           | Tooltip text color                                                                                  |
-| **tooltipBgColor**     | `string`                                                       | `"#ffffff"`                           | Tooltip background color                                                                            |
-| **bubbleSize**         | `number`                                                       | `56`                                  | Diameter of bubble in pixels                                                                        |
+| **shape**              | `"round"`, `"square"`, `"label"`                               | `"round"`                             | Button shape; `"label"` shows `label` next to the icon                                              |
+| **label**              | `string`                                                       | —                                     | Words on the `"label"` button, any language                                                         |
+| **icon**               | `"chat"`, `"help"`, `"calendar"`, `"phone"`, `"image"`         | `"chat"`                              | Built-in icon, or `"image"` for `iconUrl`                                                           |
+| **iconUrl**            | `string`                                                       | —                                     | `https://` image for `icon: "image"` (a logo or your own icon)                                      |
+| **size**               | `"S"`, `"M"`, `"L"`                                            | `"M"`                                 | 48, 56 or 64 px                                                                                     |
+| **offsetBottom**       | `number`                                                       | `20`                                  | Pixels from the bottom (or top)                                                                     |
+| **offsetSide**         | `number`                                                       | `20`                                  | Pixels from the side                                                                                |
+| **hiddenPaths**        | `string[]`                                                     | `[]`                                  | Pages where the chat stays away; `/checkout` also hides `/checkout/…`                               |
+| **ownButton**          | `boolean`                                                      | `false`                               | Hide the floating button; open the chat from any `data-erix-open` element                           |
+| **nudge**              | `{ text: string, delay: number }`                              | —                                     | A small message above the button after `delay` seconds, once per visit                              |
+| **bubbleIcon**         | `string`                                                       | —                                     | Your own icon (emoji, SVG string or image URL), shown with `icon: "chat"`                           |
+| **bubbleColor**        | `string`                                                       | `"#2b4dcb"`                           | Button colour                                                                                       |
+| **iconColor**          | `string`                                                       | white or ink, whichever reads         | Icon and words colour                                                                               |
+| **tooltipText**        | `string`                                                       | `"Chat with us"`                      | The button's accessible name                                                                        |
+| **bubbleSize**         | `number`                                                       | —                                     | Button height in px (overrides `size`)                                                              |
 | **bubblePosition**     | `"bottom-left"`, `"bottom-right"`, `"top-left"`, `"top-right"` | `"bottom-right"`                      | Screen corner position                                                                              |
 | **iframeWidth**        | `number`                                                       | `380`                                 | Width of chat iframe, kept in the viewport                                                            |
 | **iframeHeight**       | `number`                                                       | `600`                                 | Height of chat iframe, kept in the viewport                                                           |
-| **iframeBorderRadius** | `number`                                                       | `8`                                   | Iframe border radius in px                                                                          |
-| **shadow**             | `string`                                                       | `"0 25px 50px -12px rgba(0,0,0,0.4)"` | Shadow under iframe                                                                                 |
-| **bubbleShadow**       | `string`                                                       | `"0 10px 40px rgba(0,0,0,0.2)"`       | Shadow under bubble                                                                                 |
-| **ripple**             | `boolean`                                                      | `true`                                | Enable ripple animation                                                                             |
-| **rippleSpeed**        | `number`                                                       | `1.5`                                 | Ripple speed multiplier                                                                             |
+| **iframeBorderRadius** | `number`                                                       | `16`                                  | Chat window corner radius in px                                                                     |
+| **shadow**             | `string`                                                       | soft blue-tinted                      | Shadow under the chat window                                                                        |
+| **bubbleShadow**       | `string`                                                       | soft blue-tinted                      | Shadow under the button                                                                             |
 | **autoOpen**           | `number`                                                       | `0`                                   | Seconds before iframe auto-opens                                                                    |
 | **closeClickOutside**  | `boolean`                                                      | `true`                                | Close iframe on outside click                                                                       |
 

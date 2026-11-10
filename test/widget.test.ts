@@ -29,6 +29,7 @@ async function load(script?: { erix?: string }) {
 const bubbles = () => document.querySelectorAll<HTMLElement>("[data-ecodrix-bubble]");
 const bubble = () => bubbles()[0];
 const container = () => bubble().parentElement as HTMLElement;
+const nudge = () => document.querySelector<HTMLElement>("[data-ecodrix-nudge]");
 const iframe = () => document.querySelector("iframe") as HTMLIFrameElement;
 const widget = () => window.ECODrIx as NonNullable<Window["ECODrIx"]>;
 
@@ -46,6 +47,7 @@ function fromFrame(
 
 afterEach(() => {
   window.ECODrIx?.destroy();
+  sessionStorage.clear();
   delete window.ECODrIx;
   document.body.innerHTML = "";
   vi.useRealTimers();
@@ -57,7 +59,9 @@ describe("one-line embed", () => {
     await load({ erix: "ACME" });
     expect(bubbles()).toHaveLength(1);
     expect(iframe().src).toBe(`${FRAME_ORIGIN}/widget-frame?c=ACME`);
-    expect(bubble().getAttribute("role")).toBe("button");
+    // A real button (keyboard and screen readers for free), named for what it does.
+    expect(bubble().tagName).toBe("BUTTON");
+    expect(bubble().getAttribute("aria-label")).toBe("Chat with us");
     expect(bubble().getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -107,10 +111,12 @@ describe("CONFIG from the frame", () => {
     fromFrame({ type: "CONFIG", color: "#0f766e", position: "left" });
     expect(container().style.visibility).toBe("");
     expect(bubble().style.background).toMatch(/#0f766e|rgb\(15, 118, 110\)/i);
-    expect(container().style.left).toBe("16px");
+    expect(container().style.left).toBe("20px");
     expect(container().style.right).toBe("");
-    expect(iframe().style.left).toBe("16px");
+    expect(iframe().style.left).toBe("20px");
     expect(iframe().style.right).toBe("");
+    // The window sits just above the 56 px button: 20 + 56 + 12.
+    expect(iframe().style.bottom).toBe("88px");
   });
 
   it("no CONFIG in 3 s: shown with the defaults (ERIX blue, the console's default)", async () => {
@@ -121,7 +127,7 @@ describe("CONFIG from the frame", () => {
     vi.advanceTimersByTime(1);
     expect(container().style.visibility).toBe("");
     expect(bubble().style.background).toMatch(/#2b4dcb|rgb\(43, 77, 203\)/i);
-    expect(container().style.right).toBe("16px");
+    expect(container().style.right).toBe("20px");
   });
 
   it("ignored from another origin or another window; bad values are dropped", async () => {
@@ -133,7 +139,7 @@ describe("CONFIG from the frame", () => {
     fromFrame({ type: "CONFIG", color: "red;background:url(//x)", position: "middle" });
     expect(container().style.visibility).toBe("");
     expect(bubble().style.background).toMatch(/#2b4dcb|rgb\(43, 77, 203\)/i);
-    expect(container().style.right).toBe("16px");
+    expect(container().style.right).toBe("20px");
   });
 });
 
@@ -276,8 +282,8 @@ describe("desktop window size", () => {
   it("kept inside a small laptop screen (above the bubble, 16 px from the top) and follows a resize", async () => {
     viewport(1366, 600);
     await load({ erix: "ACME" });
-    // 600 − 56 bubble − 24 gap − 16 top margin.
-    expect(size()).toEqual(["380px", "504px"]);
+    // 600 − (20 edge + 56 button + 12 gap) − 16 top margin.
+    expect(size()).toEqual(["380px", "496px"]);
     viewport(1366, 900);
     window.dispatchEvent(new Event("resize"));
     expect(size()).toEqual(["380px", "600px"]);
@@ -301,7 +307,9 @@ describe("close + focus", () => {
     expect(iframe().getAttribute("tabindex")).toBe("-1");
     expect(iframe().getAttribute("aria-hidden")).toBe("true");
     bubble().focus();
-    bubble().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    // A real <button>: Enter fires a click with no pointer (detail 0).
+    expect(bubble().tagName).toBe("BUTTON");
+    bubble().click();
     expect(bubble().getAttribute("aria-expanded")).toBe("true");
     expect(iframe().getAttribute("aria-hidden")).toBe("false");
     expect(document.activeElement).toBe(iframe());
@@ -309,5 +317,92 @@ describe("close + focus", () => {
     expect(bubble().getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(bubble());
     expect(iframe().getAttribute("tabindex")).toBe("-1");
+  });
+});
+
+describe("the business's look (Look tab, 10 Nov 2026)", () => {
+  it("shape, words, size, icon colour that reads, and distance from the edges", async () => {
+    await load({ erix: "ACME" });
+    fromFrame({
+      type: "CONFIG",
+      color: "#fde047",
+      shape: "label",
+      label: "Book a visit",
+      size: "L",
+      offsetBottom: 32,
+      offsetSide: 12,
+    });
+    expect(bubble().dataset.shape).toBe("label");
+    expect(bubble().textContent).toContain("Book a visit");
+    expect(bubble().getAttribute("aria-label")).toBe("Book a visit");
+    expect(bubble().style.height).toBe("64px");
+    // Yellow is too light for white words: ink instead.
+    expect(bubble().style.color).toMatch(/#161921|rgb\(22, 25, 33\)/i);
+    expect(container().style.bottom).toBe("32px");
+    expect(container().style.right).toBe("12px");
+    // Open: the button becomes Close, without the words.
+    bubble().click();
+    expect(bubble().getAttribute("aria-label")).toBe("Close chat");
+    expect(bubble().textContent).not.toContain("Book a visit");
+  });
+
+  it("an image icon only from https, never through innerHTML", async () => {
+    await load({ erix: "ACME" });
+    fromFrame({ type: "CONFIG", icon: "image", iconUrl: "javascript:alert(1)" });
+    expect(bubble().querySelector("img")).toBeNull();
+    fromFrame({ type: "CONFIG", icon: "image", iconUrl: "https://acme.in/tooth.svg" });
+    expect(bubble().querySelector("img")?.getAttribute("src")).toBe("https://acme.in/tooth.svg");
+    fromFrame({ type: "CONFIG", label: "<img src=x onerror=alert(1)>", shape: "label" });
+    expect(bubble().querySelectorAll("img").length).toBe(1);
+  });
+
+  it("hidden pages, the chat turned off, and the site's own button", async () => {
+    window.history.pushState({}, "", "/checkout/pay");
+    await load({ erix: "ACME" });
+    fromFrame({ type: "CONFIG", hiddenPaths: ["/checkout"] });
+    expect(container().style.display).toBe("none");
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(container().style.display).toBe("");
+
+    // Own button: no launcher, any data-erix-open element opens the chat.
+    fromFrame({ type: "CONFIG", ownButton: true });
+    expect(container().style.display).toBe("none");
+    const own = document.createElement("a");
+    own.href = "#";
+    own.setAttribute("data-erix-open", "");
+    own.innerHTML = "<span>Book a visit</span>";
+    document.body.appendChild(own);
+    (own.firstChild as HTMLElement).click();
+    expect(widget().isOpen()).toBe(true);
+
+    // Off (or this site isn't listed): closed, and nothing opens it.
+    fromFrame({ type: "CONFIG", hidden: true, ownButton: false });
+    expect(widget().isOpen()).toBe(false);
+    expect(container().style.display).toBe("none");
+    (own.firstChild as HTMLElement).click();
+    expect(widget().isOpen()).toBe(false);
+  });
+
+  it("the welcome nudge: after its delay, once per visit, opens the chat", async () => {
+    vi.useFakeTimers();
+    await load({ erix: "ACME" });
+    fromFrame({
+      type: "CONFIG",
+      nudge: { text: "Need an appointment? I can book it now.", delay: 5 },
+    });
+    vi.advanceTimersByTime(4999);
+    expect(nudge()).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(nudge()?.textContent).toContain("Need an appointment?");
+    nudge()?.querySelector<HTMLElement>("[data-text]")?.click();
+    expect(widget().isOpen()).toBe(true);
+    expect(nudge()).toBeNull();
+    // Same visit, next page: not again.
+    widget().destroy();
+    await load({ erix: "ACME" });
+    fromFrame({ type: "CONFIG", nudge: { text: "Again?", delay: 1 } });
+    vi.advanceTimersByTime(2000);
+    expect(nudge()).toBeNull();
   });
 });

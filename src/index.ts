@@ -1,17 +1,27 @@
 /**
  * @module @ecodrix/chatbot
- * ECODrIx chat widget — a lightweight, dependency-free floating chat bubble that
- * opens the hosted chat iframe. Usable via the one-line CDN tag
- * (`<script src="…/v2.js" data-erix="CLIENT_CODE" async></script>`, starts
- * itself), `window.ECODrIx.init`, any bundler (ESM/CJS), or the React entry
- * (`@ecodrix/chatbot/react`).
+ * ECODrIx chat widget — a lightweight, dependency-free chat button that opens
+ * the hosted chat iframe. Usable via the one-line CDN tag
+ * (`<script src="…/index.global.js" data-erix="CLIENT_CODE" async></script>`,
+ * starts itself), `window.ECODrIx.init`, any bundler (ESM/CJS), or the React
+ * entry (`@ecodrix/chatbot/react`).
+ *
+ * The button's look comes from the business's saved settings (ERIX › Channels
+ * › Website chat › Look), sent by the frame as CONFIG, so the one line on the
+ * site never changes. Any element with `data-erix-open` opens the chat.
  *
  * postMessage protocol with the hosted frame (`/widget-frame`). Messages in
  * are trusted only from the iframe this widget opened (its origin AND its
  * window); messages out go to that origin only.
  *   frame → widget  CHAT_WIDGET_CLOSE              close (Esc / close button)
- *   frame → widget  CONFIG { color?, position? }   the business's colour (#rrggbb)
- *                                                  and side ("left" | "right")
+ *   frame → widget  CONFIG { color?, position?,    the business's look: colour
+ *                    shape?, label?, icon?,         (#rrggbb), side, button
+ *                    iconUrl?, size?, offsetBottom?, shape / words / icon /
+ *                    offsetSide?, hiddenPaths?,     size, distance from the
+ *                    ownButton?, nudge?, hidden? }  edges, pages to stay off,
+ *                                                  "own button", the welcome
+ *                                                  nudge, and `hidden` (chat
+ *                                                  off, or this site isn't listed)
  *   widget → frame  OPEN                           the visitor opened the chat
  *                                                  (again on CONFIG if already
  *                                                  open): the frame goes live
@@ -25,8 +35,13 @@
  * the safe area, and the host page doesn't scroll behind it.
  */
 
-/** Bubble screen position. */
+/** Button screen position. */
 export type BubblePosition = "bottom-left" | "bottom-right" | "top-left" | "top-right";
+/** Round, rounded square, or a pill with words. */
+export type LauncherShape = "round" | "square" | "label";
+/** Built-in icons; `image` shows `iconUrl` (a logo or the business's own icon). */
+export type LauncherIcon = "chat" | "help" | "calendar" | "phone" | "image";
+export type LauncherSize = "S" | "M" | "L";
 
 /** Configuration for the ECODrIx chat widget. */
 export interface ECODrIxWidgetConfig {
@@ -48,64 +63,104 @@ export interface ECODrIxWidgetConfig {
   /** Called when the chat window closes. */
   onClose?: () => void;
 
-  // ── Appearance ──────────────────────────────────────────────────────────
-  /** Emoji, SVG string, or image URL for the bubble icon. */
+  // ── Appearance (the saved Look settings override these) ───────────────────
+  /** Your own icon: emoji, SVG string or image URL (shown when no saved icon). */
   bubbleIcon?: string;
-  /** Base color for the bubble gradient. */
+  /** Button colour (#rrggbb). */
   bubbleColor?: string;
-  /** Icon color inside the bubble. */
+  /** Icon colour; default: white or ink, whichever reads on the colour. */
   iconColor?: string;
-  /** Pulse/ripple color. */
+  /** @deprecated No pulse any more; kept so old configs still type-check. */
   pulseColor?: string;
-  /** Hover tooltip text. */
+  /** Accessible name of the button ("Chat with us"). */
   tooltipText?: string;
-  /** Tooltip text color. */
+  /** @deprecated The hover tooltip was replaced by the welcome nudge. */
   tooltipColor?: string;
-  /** Tooltip background color. */
+  /** @deprecated The hover tooltip was replaced by the welcome nudge. */
   tooltipBgColor?: string;
-  /** Bubble diameter in px. */
+  /** Button height in px (overrides `size`). */
   bubbleSize?: number;
   /** Screen corner. */
   bubblePosition?: BubblePosition;
-  /** Chat iframe width in px (default 380, kept inside the viewport). */
+  shape?: LauncherShape;
+  /** Words on the "label" shape, any language. */
+  label?: string;
+  icon?: LauncherIcon;
+  /** `https://` image for `icon: "image"`. */
+  iconUrl?: string;
+  size?: LauncherSize;
+  /** Pixels from the bottom (or top) and from the side. Default 20. */
+  offsetBottom?: number;
+  offsetSide?: number;
+  /** Page paths where the chat stays away (`/checkout` also hides `/checkout/…`). */
+  hiddenPaths?: string[];
+  /** Hide the button: the site opens the chat from its own `data-erix-open` element. */
+  ownButton?: boolean;
+  /** A small message above the button after `delay` seconds, once per visit. */
+  nudge?: { text: string; delay: number } | null;
+  /** Chat window width in px (default 380, kept inside the viewport). */
   iframeWidth?: number;
-  /** Chat iframe height in px (default 600, kept inside the viewport). */
+  /** Chat window height in px (default 600, kept inside the viewport). */
   iframeHeight?: number;
-  /** Iframe border radius in px. */
+  /** Chat window corner radius in px. */
   iframeBorderRadius?: number;
-  /** Iframe box-shadow. */
+  /** Chat window shadow. */
   shadow?: string;
-  /** Bubble box-shadow. */
+  /** Button shadow. */
   bubbleShadow?: string;
-  /** Close iframe on outside click. */
+  /** Close the chat on a click outside it. */
   closeClickOutside?: boolean;
   /** Auto-open after N seconds (0 = disabled). */
   autoOpen?: number;
 }
 
+/** Icons drawn on the button (24 px grid, stroke = currentColor; Lucide, ISC). */
+const ICONS: Record<Exclude<LauncherIcon, "image"> | "close", string> = {
+  chat: '<path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/>',
+  help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  calendar:
+    '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+  phone:
+    '<path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/>',
+  close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+};
+const svg = (paths: string, px: number) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
+
+const SIZES: Record<LauncherSize, number> = { S: 48, M: 56, L: 64 };
+const INK = "#161921";
+
 const DEFAULTS = {
-  bubbleIcon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-circle-icon"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></svg>`,
+  bubbleIcon: "",
   // ERIX blue (`--primary`): the console's default colour and the frame's
   // default visitor bubble, so a business with no colour saved sees one blue.
   bubbleColor: "#2b4dcb",
-  iconColor: "#ffffff",
-  pulseColor: "#34d399",
-  tooltipText: "Chat with us!",
-  tooltipColor: "#333333",
-  tooltipBgColor: "#ffffff",
+  iconColor: "",
+  tooltipText: "Chat with us",
   closeClickOutside: true,
-  bubbleSize: 56,
+  bubbleSize: 0,
   bubblePosition: "bottom-right" as BubblePosition,
+  shape: "round" as LauncherShape,
+  label: "",
+  icon: "chat" as LauncherIcon,
+  iconUrl: "",
+  size: "M" as LauncherSize,
+  offsetBottom: 20,
+  offsetSide: 20,
+  hiddenPaths: [] as string[],
+  ownButton: false,
+  nudge: null as { text: string; delay: number } | null,
   iframeWidth: 380,
   iframeHeight: 600,
-  iframeBorderRadius: 8,
+  iframeBorderRadius: 16,
   autoOpen: 0,
-  shadow: "0 25px 50px -12px rgba(0,0,0,0.4)",
-  bubbleShadow: "0 10px 40px rgba(0,0,0,0.2)",
+  shadow: "0 24px 48px -12px rgba(14,32,107,0.32), 0 0 0 1px rgba(14,32,107,0.06)",
+  bubbleShadow: "0 1px 2px rgba(14,32,107,0.22), 0 8px 24px -6px rgba(14,32,107,0.35)",
   baseUrl: "https://console.ecodrix.com",
 };
 
-type ResolvedConfig = typeof DEFAULTS & ECODrIxWidgetConfig;
+type ResolvedConfig = typeof DEFAULTS &
+  Omit<ECODrIxWidgetConfig, keyof typeof DEFAULTS> & { botUrl?: string };
 
 /** Origin of the widget iframe URL, or "" when there's no valid URL. */
 function frameOrigin(url: string | undefined): string {
@@ -116,9 +171,33 @@ function frameOrigin(url: string | undefined): string {
   }
 }
 
-/** How long the bubble waits for the frame's CONFIG before showing the defaults. */
+/** How long the button waits for the frame's CONFIG before showing the defaults. */
 const CONFIG_TIMEOUT_MS = 3000;
 const HEX = /^#[0-9a-f]{6}$/i;
+const NUDGE_KEY = "ecodrix-nudge-seen";
+
+/** White, unless white falls under `min` contrast on the colour (WCAG): then ink. */
+export function readableOn(hex: string, min = 3): string {
+  const ch = (i: number) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const l = 0.2126 * ch(1) + 0.7152 * ch(3) + 0.0722 * ch(5);
+  return 1.05 / (l + 0.05) >= min ? "#ffffff" : INK;
+}
+
+/** Is `path` one of `hidden` (or below one)? `/checkout` hides `/checkout/pay`. */
+export function onHiddenPath(path: string, hidden: readonly string[]): boolean {
+  return hidden.some((p) => {
+    const base = p.replace(/\/+$/, "") || "/";
+    return base === "/" ? path === "/" : path === base || path.startsWith(`${base}/`);
+  });
+}
+
+const httpsUrl = (v: unknown): string =>
+  typeof v === "string" && /^https:\/\/[^\s"'<>]+$/i.test(v) ? v : "";
+const px = (v: unknown, max = 160): number | undefined =>
+  typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : undefined;
 
 /**
  * Resolve the iframe URL from config: an explicit `botUrl` wins; otherwise it's
@@ -142,28 +221,29 @@ export class ECODrIxWidget {
   // Definite-assignment: set in the constructor's normal path. The singleton
   // early-return discards the un-initialized throwaway instance.
   private config!: ResolvedConfig;
-  private bubbleContainer!: HTMLDivElement;
-  private bubble!: HTMLDivElement;
-  private iconContainer!: HTMLDivElement;
-  private tooltip!: HTMLDivElement;
-  private tooltipArrow!: HTMLDivElement;
+  private container!: HTMLDivElement;
+  private bubble!: HTMLButtonElement;
+  private nudgeBox: HTMLDivElement | null = null;
   private iframe: HTMLIFrameElement | null = null;
   private autoOpenTimeout: ReturnType<typeof setTimeout> | null = null;
   private configTimeout: ReturnType<typeof setTimeout> | null = null;
+  private nudgeTimeout: ReturnType<typeof setTimeout> | null = null;
   /** Set while running: removes every window listener on destroy. */
   private listeners: AbortController | null = null;
   private isOpen = false;
+  /** The frame said: chat off, or this website isn't on the business's list. */
+  private hidden = false;
 
   constructor(config: ECODrIxWidgetConfig) {
     if (activeWidget) return activeWidget;
 
-    this.config = { ...DEFAULTS, ...config };
+    this.config = { ...DEFAULTS, ...config } as ResolvedConfig;
     this.config.botUrl = resolveWidgetUrl(this.config);
   }
 
   init(): void {
     // Already running (a second init, or the one-line tag plus init): one
-    // bubble, one iframe.
+    // button, one iframe.
     if (this.listeners) return;
     if (!this.config.botUrl) {
       throw new Error("[ECODrIx] Provide `clientCode` (recommended) or `botUrl`.");
@@ -173,26 +253,68 @@ export class ECODrIxWidget {
     window.addEventListener("message", (e) => this.onFrameMessage(e), on);
     window.addEventListener("resize", () => this.updateDimensions(), on);
     window.addEventListener("orientationchange", () => this.updateDimensions(), on);
-    // A single-page site moved on: the chat gets the new page.
+    // A single-page site moved on: the chat gets the new page, and pages the
+    // business hid take the chat away.
     // ponytail: history.pushState fires no event, so an SPA's in-app link
     // while the chat is open isn't seen (PAGE is re-sent on every open) —
     // wrap pushState/replaceState if stale page context shows up.
-    window.addEventListener("popstate", () => this.postPage(), on);
-    window.addEventListener("hashchange", () => this.postPage(), on);
+    const moved = () => {
+      this.postPage();
+      this.applyVisibility();
+    };
+    window.addEventListener("popstate", moved, on);
+    window.addEventListener("hashchange", moved, on);
+    // The site's own buttons: any element with `data-erix-open` opens the chat.
+    document.addEventListener(
+      "click",
+      (e) => {
+        const target = e.target as Element | null;
+        if (!target?.closest?.("[data-erix-open]") || this.hidden) return;
+        e.preventDefault();
+        this.showIframe();
+        this.iframe?.focus();
+      },
+      on,
+    );
+    // Close on a click outside the chat (desktop), as before.
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (!this.isOpen || !this.config.closeClickOutside) return;
+        const t = e.target as Node | null;
+        if (t && (this.container.contains(t) || this.iframe?.contains(t))) return;
+        if ((t as Element | null)?.closest?.("[data-erix-open]")) return;
+        if (window.innerWidth > 480) this.hideIframe();
+      },
+      on,
+    );
 
     this.addStyles();
     this.createBubble();
     this.preloadIframe();
+    this.paint();
     this.place();
     // After the iframe exists — before, the phone sizing silently no-op'd.
     this.updateDimensions();
-    // The bubble stays hidden until the frame sends the business's colour
-    // and side (CONFIG), so it never flashes the wrong colour; defaults after 3 s.
+    // The button stays hidden until the frame sends the business's look
+    // (CONFIG), so it never flashes the wrong one; defaults after 3 s.
     this.configTimeout = setTimeout(() => this.reveal(), CONFIG_TIMEOUT_MS);
 
     if (this.config.autoOpen > 0) {
       this.autoOpenTimeout = setTimeout(() => this.showIframe(), this.config.autoOpen * 1000);
     }
+  }
+
+  /** The button's height in px. */
+  private size(): number {
+    return this.config.bubbleSize > 0 ? this.config.bubbleSize : SIZES[this.config.size];
+  }
+
+  /** How far above the edge the chat window sits: just above the button. */
+  private windowGap(): number {
+    return this.config.ownButton
+      ? this.config.offsetBottom
+      : this.config.offsetBottom + this.size() + 12;
   }
 
   updateDimensions(_width?: number, _height?: number): void {
@@ -205,10 +327,10 @@ export class ECODrIxWidget {
       iframeWidth = Math.min(360, iframeWidth * 0.9);
       iframeHeight = Math.min(540, iframeHeight * 1);
     }
-    // Small laptop screens: the window sits above the bubble (bubble + 24 px
-    // from the edge) and keeps 16 px from the other edges.
+    // Small laptop screens: the window sits above the button and keeps 16 px
+    // from the other edges.
     iframeWidth = Math.min(iframeWidth, vw - 32);
-    iframeHeight = Math.min(iframeHeight, vh - this.config.bubbleSize - 24 - 16);
+    iframeHeight = Math.min(iframeHeight, vh - this.windowGap() - 16);
     // Phones: this is the closed size; the open chat is the full-screen
     // sheet in addStyles().
     if (vw <= 480) {
@@ -222,22 +344,36 @@ export class ECODrIxWidget {
   private addStyles(): void {
     if (document.getElementById("ecodrix-widget-styles")) return;
     const styles = `
-      @keyframes ecodrix-bubble-float {
-        0% { transform: translateY(0px) scale(1); }
-        50% { transform: translateY(-5px) scale(1.02); }
-        100% { transform: translateY(0px) scale(1); }
+      [data-ecodrix-bubble] {
+        all: initial; box-sizing: border-box; cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        font: 700 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        transition: transform .18s ease, box-shadow .18s ease;
+        -webkit-tap-highlight-color: transparent;
       }
-      @keyframes ecodrix-bubble-pulse {
-        0% { box-shadow: 0 0 0 0 rgba(43, 77, 203, 0.4); }
-        70% { box-shadow: 0 0 0 15px rgba(43, 77, 203, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(43, 77, 203, 0); }
+      [data-ecodrix-bubble]:hover { transform: translateY(-1px); }
+      [data-ecodrix-bubble]:active { transform: scale(.97); }
+      [data-ecodrix-bubble]:focus-visible { outline: 3px solid rgba(43,77,203,.55); outline-offset: 3px; }
+      [data-ecodrix-bubble] img { width: 58%; height: 58%; object-fit: contain; border-radius: 6px; pointer-events: none; }
+      [data-ecodrix-bubble][data-shape="label"] img { width: 22px; height: 22px; }
+      [data-ecodrix-nudge] {
+        position: absolute; display: flex; align-items: flex-start; gap: 6px;
+        width: max-content; max-width: 240px; padding: 10px 8px 10px 12px;
+        background: #fff; color: #161921; border-radius: 14px;
+        box-shadow: 0 0 0 1px rgba(14,32,107,.08), 0 12px 32px -8px rgba(14,32,107,.3);
+        font: 500 13px/18px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        animation: ecodrix-nudge-in .22s ease-out;
       }
-      [data-ecodrix-bubble]:focus-visible {
-        outline: 3px solid rgba(43, 77, 203, 0.6);
-        outline-offset: 3px;
+      [data-ecodrix-nudge] button { all: unset; cursor: pointer; }
+      [data-ecodrix-nudge] [data-text]:focus-visible, [data-ecodrix-nudge] [data-dismiss]:focus-visible { outline: 2px solid #2b4dcb; outline-offset: 2px; border-radius: 4px; }
+      [data-ecodrix-nudge] [data-dismiss] { color: #575c67; padding: 0 4px; font-size: 16px; line-height: 16px; }
+      @keyframes ecodrix-nudge-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) {
+        [data-ecodrix-bubble], iframe[data-ecodrix-frame] { transition: none !important; }
+        [data-ecodrix-nudge] { animation: none; }
       }
       /* Phones: the open chat fills the screen inside the safe area (notch,
-         home bar), above the bubble, and the page behind it doesn't scroll.
+         home bar), above the button, and the page behind it doesn't scroll.
          Closing removes the attribute, which restores both. Explicit sizes:
          an iframe sized "auto" between insets falls back to 300x150. 100vh
          first, then 100dvh where supported (the visible height, without the
@@ -266,107 +402,79 @@ export class ECODrIxWidget {
   }
 
   private createBubble(): void {
-    this.bubbleContainer = document.createElement("div");
-    this.bubbleContainer.style.cssText = `
-      position: fixed;
-      width: ${this.config.bubbleSize}px;
-      height: ${this.config.bubbleSize}px;
-      z-index: 100000;
-      pointer-events: auto;
-      visibility: hidden;
-    `;
+    this.container = document.createElement("div");
+    this.container.setAttribute("data-ecodrix-launcher", "");
+    this.container.style.cssText =
+      "position: fixed; z-index: 100000; pointer-events: auto; visibility: hidden;";
 
-    this.bubble = document.createElement("div");
-    this.bubble.style.cssText = `
-      width: ${this.config.bubbleSize}px;
-      height: ${this.config.bubbleSize}px;
-      border-radius: 50%;
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      overflow: visible;
-      transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
-      box-shadow: ${this.config.bubbleShadow};
-    `;
-
-    // Accessibility: a div-with-onclick is invisible to keyboards + screen
-    // readers, so expose it as a labeled, focusable button.
+    // A real button: keyboards and screen readers get it for free.
+    this.bubble = document.createElement("button");
+    this.bubble.type = "button";
     this.bubble.setAttribute("data-ecodrix-bubble", "");
-    this.bubble.setAttribute("role", "button");
-    this.bubble.setAttribute("tabindex", "0");
     this.bubble.setAttribute("aria-label", this.config.tooltipText);
     this.bubble.setAttribute("aria-expanded", "false");
-    this.bubble.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        this.toggleIframe();
-        // Keyboard users land in the chat box (the frame focuses its input).
-        if (this.isOpen) this.iframe?.focus();
-      }
+    this.bubble.addEventListener("click", (e) => {
+      this.toggleIframe();
+      // Keyboard users (Enter / Space: a click with no pointer) land in the
+      // chat box (the frame focuses its input).
+      if (this.isOpen && e.detail === 0) this.iframe?.focus();
     });
+    this.container.appendChild(this.bubble);
+    document.body.appendChild(this.container);
+  }
 
-    this.iconContainer = document.createElement("div");
-    this.iconContainer.style.cssText = `
-      width: 100%; height: 100%;
-      display: flex; align-items: center; justify-content: center;
-      transition: transform 0.3s ease;
-    `;
-    this.iconContainer.innerHTML = this.config.bubbleIcon;
-    this.bubble.appendChild(this.iconContainer);
-    this.paintBubble();
-    this.bubbleContainer.appendChild(this.bubble);
-    document.body.appendChild(this.bubbleContainer);
+  /** Shape, colour, icon and words of the button, from the current config. */
+  private paint(): void {
+    const c = this.config;
+    const size = this.size();
+    const words = c.shape === "label" && !!c.label && !this.isOpen;
+    const b = this.bubble.style;
+    this.bubble.setAttribute(
+      "data-shape",
+      words ? "label" : c.shape === "square" ? "square" : "round",
+    );
+    b.height = `${size}px`;
+    b.minWidth = `${size}px`;
+    b.width = words ? "auto" : `${size}px`;
+    b.padding = words ? `0 20px 0 ${Math.round(size / 3.2)}px` : "0";
+    b.borderRadius = c.shape === "square" && !words ? `${Math.round(size * 0.28)}px` : "9999px";
+    b.background = c.bubbleColor;
+    // Words need 4.5:1 (text); an icon alone 3:1 (a graphic).
+    b.color = c.iconColor || readableOn(c.bubbleColor, words ? 4.5 : 3);
+    b.boxShadow = c.bubbleShadow;
 
-    this.tooltip = document.createElement("div");
-    this.tooltip.innerText = this.config.tooltipText;
-    this.tooltip.style.cssText = `
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      background-color: ${this.config.tooltipBgColor};
-      color: ${this.config.tooltipColor};
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      white-space: nowrap;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.3s ease, transform 0.3s ease;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-      z-index: 100001;
-    `;
-    this.tooltipArrow = document.createElement("div");
-    this.tooltipArrow.style.cssText = `
-      position: absolute; width: 0; height: 0;
-      border-top: 5px solid transparent;
-      border-bottom: 5px solid transparent;
-      top: 50%; transform: translateY(-50%);
-    `;
-    this.tooltip.appendChild(this.tooltipArrow);
-    this.bubbleContainer.appendChild(this.tooltip);
-
-    this.bubble.addEventListener("mouseenter", () => {
-      if (this.isOpen) return;
-      this.bubble.style.transform = "scale(1.1)";
-      this.iconContainer.style.transform = "scale(1.1)";
-      this.tooltip.style.opacity = "1";
-      // Nudge away from the bubble, towards the page.
-      const away = this.config.bubblePosition.endsWith("left") ? 5 : -5;
-      this.tooltip.style.transform = `translateY(-50%) translateX(${away}px)`;
-    });
-    this.bubble.addEventListener("mouseleave", () => {
-      if (this.isOpen) return;
-      this.bubble.style.transform = "scale(1)";
-      this.iconContainer.style.transform = "scale(1)";
-      this.tooltip.style.opacity = "0";
-      this.tooltip.style.transform = "translateY(-50%) translateX(0)";
-    });
-
-    this.bubble.addEventListener("click", () => this.toggleIframe());
+    const iconPx = Math.round(size * (words ? 0.4 : 0.44));
+    // Built from parts: the frame's words and URLs never go through innerHTML.
+    this.bubble.textContent = "";
+    if (this.isOpen) this.bubble.insertAdjacentHTML("beforeend", svg(ICONS.close, iconPx));
+    else if (c.icon === "image" && c.iconUrl) {
+      const img = document.createElement("img");
+      img.src = c.iconUrl;
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      this.bubble.appendChild(img);
+    } else if (c.bubbleIcon && c.icon === "chat") {
+      // The integrator's own icon from `init` (their page, their markup).
+      const box = document.createElement("span");
+      box.style.cssText = "display:flex;align-items:center;justify-content:center";
+      box.innerHTML = /^https?:\/\//.test(c.bubbleIcon)
+        ? `<img src="${c.bubbleIcon.replace(/"/g, "&quot;")}" alt="">`
+        : c.bubbleIcon;
+      this.bubble.appendChild(box);
+    } else
+      this.bubble.insertAdjacentHTML(
+        "beforeend",
+        svg(ICONS[(c.icon === "image" ? "chat" : c.icon) as keyof typeof ICONS], iconPx),
+      );
+    if (words) {
+      const span = document.createElement("span");
+      span.textContent = c.label;
+      this.bubble.appendChild(span);
+    }
+    this.bubble.setAttribute(
+      "aria-label",
+      this.isOpen ? "Close chat" : words ? c.label : c.tooltipText,
+    );
   }
 
   private preloadIframe(): void {
@@ -387,9 +495,9 @@ export class ECODrIxWidget {
       box-shadow: ${this.config.shadow};
       z-index: 99999;
       opacity: 0;
-      transform: scale(0.8) translateY(20px);
+      transform: scale(0.96) translateY(12px);
       pointer-events: none;
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: opacity .2s ease, transform .2s ease;
       background: white;
     `;
     document.body.appendChild(this.iframe);
@@ -401,40 +509,42 @@ export class ECODrIxWidget {
   }
 
   showIframe(): void {
-    if (!this.iframe) return;
+    if (!this.iframe || this.hidden) return;
     this.reveal();
+    this.dropNudge(true);
     // The frame opens its live connection only now (it's preloaded, hidden,
     // on every page view).
     this.post({ type: "OPEN" });
     this.postPage();
     document.documentElement.setAttribute("data-ecodrix-open", "");
     this.isOpen = true;
-    this.tooltip.style.opacity = "0";
-    this.bubble.style.transform = "scale(1)";
     this.iframe.style.opacity = "1";
-    this.iframe.style.transform = "scale(1) translateY(0)";
+    this.iframe.style.transform = "none";
     this.iframe.style.pointerEvents = "auto";
     this.iframe.setAttribute("aria-hidden", "false");
     this.iframe.removeAttribute("tabindex");
     this.bubble?.setAttribute("aria-expanded", "true");
+    this.paint();
     this.config.onOpen?.();
   }
 
   hideIframe(): void {
     if (!this.iframe) return;
     // Closing from inside the chat (Esc / close button) must not drop focus.
-    if (document.activeElement === this.iframe) this.bubble?.focus();
+    if (document.activeElement === this.iframe && !this.config.ownButton) this.bubble?.focus();
     document.documentElement.removeAttribute("data-ecodrix-open");
     // The frame reports replies read only while the chat is on screen.
-    if (this.isOpen) this.post({ type: "CLOSE" });
+    const wasOpen = this.isOpen;
+    if (wasOpen) this.post({ type: "CLOSE" });
     this.isOpen = false;
     this.iframe.style.opacity = "0";
-    this.iframe.style.transform = "scale(0.8) translateY(20px)";
+    this.iframe.style.transform = "scale(0.96) translateY(12px)";
     this.iframe.style.pointerEvents = "none";
     this.iframe.setAttribute("aria-hidden", "true");
     this.iframe.setAttribute("tabindex", "-1");
     this.bubble?.setAttribute("aria-expanded", "false");
-    this.config.onClose?.();
+    if (this.bubble) this.paint();
+    if (wasOpen) this.config.onClose?.();
   }
 
   /**
@@ -448,72 +558,142 @@ export class ECODrIxWidget {
       event.source !== this.iframe.contentWindow
     )
       return;
-    const data = event.data as {
-      type?: unknown;
-      color?: unknown;
-      position?: unknown;
-    } | null;
+    const data = event.data as Record<string, unknown> | null;
     if (data?.type === "CHAT_WIDGET_CLOSE") this.hideIframe();
     else if (data?.type === "CONFIG") this.applyFrameConfig(data);
   }
 
-  /** The business's colour and side from the frame (ignored when malformed). */
-  private applyFrameConfig(data: { color?: unknown; position?: unknown }): void {
-    if (typeof data.color === "string" && HEX.test(data.color)) {
-      this.config.bubbleColor = data.color;
-      this.paintBubble();
+  /** The business's saved look from the frame; malformed values are ignored. */
+  private applyFrameConfig(d: Record<string, unknown>): void {
+    const c = this.config;
+    if (typeof d.color === "string" && HEX.test(d.color)) c.bubbleColor = d.color;
+    if (d.position === "left" || d.position === "right") {
+      const [vertical] = c.bubblePosition.split("-");
+      c.bubblePosition = `${vertical}-${d.position}` as BubblePosition;
     }
-    if (data.position === "left" || data.position === "right") {
-      const [vertical] = this.config.bubblePosition.split("-");
-      this.config.bubblePosition = `${vertical}-${data.position}` as BubblePosition;
-      this.place();
-    }
+    if (d.shape === "round" || d.shape === "square" || d.shape === "label") c.shape = d.shape;
+    if (typeof d.label === "string") c.label = d.label.trim().slice(0, 30);
+    if (d.size === "S" || d.size === "M" || d.size === "L") c.size = d.size;
+    if (
+      typeof d.icon === "string" &&
+      ["chat", "help", "calendar", "phone", "image"].includes(d.icon)
+    )
+      c.icon = d.icon as LauncherIcon;
+    const iconUrl = httpsUrl(d.iconUrl);
+    if (iconUrl) c.iconUrl = iconUrl;
+    if (c.icon === "image" && !c.iconUrl) c.icon = "chat";
+    const bottom = px(d.offsetBottom);
+    const side = px(d.offsetSide);
+    if (bottom !== undefined) c.offsetBottom = bottom;
+    if (side !== undefined) c.offsetSide = side;
+    if (Array.isArray(d.hiddenPaths))
+      c.hiddenPaths = d.hiddenPaths
+        .filter((p): p is string => typeof p === "string" && /^\/\S{0,100}$/.test(p))
+        .slice(0, 20);
+    if (typeof d.ownButton === "boolean") c.ownButton = d.ownButton;
+    const n = d.nudge as { text?: unknown; delay?: unknown } | null | undefined;
+    if (n === null) c.nudge = null;
+    else if (n && typeof n.text === "string" && n.text.trim())
+      c.nudge = { text: n.text.trim().slice(0, 120), delay: px(n.delay, 120) ?? 5 };
+    this.hidden = d.hidden === true;
+
+    this.paint();
+    this.place();
+    this.updateDimensions();
+    this.applyVisibility();
     this.reveal();
+    this.scheduleNudge();
     // The frame is listening now (it sent this): an OPEN sent while it was
     // still loading was lost, and it needs the page.
     if (this.isOpen) this.post({ type: "OPEN" });
     this.postPage();
   }
 
-  /** Show the bubble (CONFIG arrived, the 3 s wait ran out, or the chat opened). */
+  /** Off, on a hidden page, or "own button": the button (and chat) step aside. */
+  private applyVisibility(): void {
+    if (!this.container) return;
+    const away = this.hidden || onHiddenPath(window.location.pathname, this.config.hiddenPaths);
+    if (away && this.isOpen) this.hideIframe();
+    this.container.style.display = away || this.config.ownButton ? "none" : "";
+    if (away) this.dropNudge(false);
+  }
+
+  /** The welcome nudge: once per visit, after its delay, only with the button showing. */
+  private scheduleNudge(): void {
+    if (this.nudgeTimeout) clearTimeout(this.nudgeTimeout);
+    this.nudgeTimeout = null;
+    const n = this.config.nudge;
+    if (!n || this.nudgeBox || this.isOpen) return;
+    try {
+      if (sessionStorage.getItem(NUDGE_KEY)) return;
+    } catch {
+      // Storage blocked: show it; it can't be remembered.
+    }
+    this.nudgeTimeout = setTimeout(() => this.showNudge(n.text), n.delay * 1000);
+  }
+
+  private showNudge(text: string): void {
+    if (this.isOpen || this.container.style.display === "none") return;
+    const box = document.createElement("div");
+    box.setAttribute("data-ecodrix-nudge", "");
+    box.setAttribute("role", "status");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.setAttribute("data-text", "");
+    open.textContent = text;
+    open.addEventListener("click", () => this.showIframe());
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.setAttribute("data-dismiss", "");
+    dismiss.setAttribute("aria-label", "Dismiss");
+    dismiss.textContent = "×";
+    dismiss.addEventListener("click", () => this.dropNudge(true));
+    box.append(open, dismiss);
+    const [vertical, sideName] = this.config.bubblePosition.split("-");
+    box.style[vertical === "top" ? "top" : "bottom"] = `${this.size() + 10}px`;
+    box.style[sideName === "left" ? "left" : "right"] = "0";
+    this.container.appendChild(box);
+    this.nudgeBox = box;
+  }
+
+  /** Remove the nudge; `seen` = don't show it again this visit. */
+  private dropNudge(seen: boolean): void {
+    if (this.nudgeTimeout) clearTimeout(this.nudgeTimeout);
+    this.nudgeTimeout = null;
+    this.nudgeBox?.remove();
+    this.nudgeBox = null;
+    if (!seen || !this.config.nudge) return;
+    try {
+      sessionStorage.setItem(NUDGE_KEY, "1");
+    } catch {
+      // Storage blocked: nothing to remember it in.
+    }
+  }
+
+  /** Show the button (CONFIG arrived, the 3 s wait ran out, or the chat opened). */
   private reveal(): void {
     if (this.configTimeout) clearTimeout(this.configTimeout);
     this.configTimeout = null;
-    if (this.bubbleContainer) this.bubbleContainer.style.visibility = "";
+    if (this.container) this.container.style.visibility = "";
   }
 
-  private paintBubble(): void {
-    const c = this.config.bubbleColor;
-    this.bubble.style.background = `linear-gradient(135deg, ${c}, ${this.shadeColor(c, -20)})`;
-  }
-
-  /** Bubble, chat window and tooltip on the configured corner. */
+  /** Button and chat window on the configured corner, at the configured distance. */
   private place(): void {
     const [vertical, side] = this.config.bubblePosition.split("-") as [
       "top" | "bottom",
       "left" | "right",
     ];
-    const inner = side === "left" ? "right" : "left";
-    const box = this.bubbleContainer.style;
+    const box = this.container.style;
     box.top = box.bottom = box.left = box.right = "";
-    box[vertical] = "24px";
-    box[side] = "16px";
+    box[vertical] = `${this.config.offsetBottom}px`;
+    box[side] = `${this.config.offsetSide}px`;
     if (this.iframe) {
       const f = this.iframe.style;
       f.top = f.bottom = f.left = f.right = "";
-      f[vertical] = `${this.config.bubbleSize + 24}px`;
-      f[side] = "16px";
+      f[vertical] = `${this.windowGap()}px`;
+      f[side] = `${Math.max(16, this.config.offsetSide)}px`;
       f.transformOrigin = `${vertical} ${side}`;
     }
-    // The tooltip sits on the page side of the bubble, its arrow pointing back.
-    const tip = this.tooltip.style;
-    tip.left = tip.right = "";
-    tip[inner] = "calc(100% + 8px)";
-    const arrow = this.tooltipArrow.style;
-    arrow.left = arrow.right = arrow.borderLeft = arrow.borderRight = "";
-    arrow[side] = "-5px";
-    arrow[side === "left" ? "borderRight" : "borderLeft"] =
-      `5px solid ${this.config.tooltipBgColor}`;
   }
 
   /**
@@ -541,11 +721,11 @@ export class ECODrIxWidget {
   }
 
   /**
-   * Merge new config and hot-apply the safe fields (URL, tooltip) without a
+   * Merge new config and hot-apply it (URL, look, accessible name) without a
    * full re-init.
    */
   updateConfig(next: Partial<ECODrIxWidgetConfig> = {}): void {
-    this.config = { ...this.config, ...next };
+    this.config = { ...this.config, ...next } as ResolvedConfig;
     // Re-resolve the URL when any URL-affecting field changed. An explicit
     // `next.botUrl` wins; otherwise rebuild from the (possibly updated)
     // clientCode/baseUrl rather than the stale stored botUrl.
@@ -560,23 +740,11 @@ export class ECODrIxWidget {
         if (this.iframe) this.iframe.src = url;
       }
     }
-    if (next.tooltipText && this.tooltip) {
-      this.tooltip.childNodes[0].nodeValue = next.tooltipText;
-      this.bubble?.setAttribute("aria-label", next.tooltipText);
-    }
-  }
-
-  private shadeColor(color: string, percent: number): string {
-    let R = parseInt(color.substring(1, 3), 16);
-    let G = parseInt(color.substring(3, 5), 16);
-    let B = parseInt(color.substring(5, 7), 16);
-    R = Math.min(255, Math.round((R * (100 + percent)) / 100));
-    G = Math.min(255, Math.round((G * (100 + percent)) / 100));
-    B = Math.min(255, Math.round((B * (100 + percent)) / 100));
-    const RR = R.toString(16).padStart(2, "0");
-    const GG = G.toString(16).padStart(2, "0");
-    const BB = B.toString(16).padStart(2, "0");
-    return `#${RR}${GG}${BB}`;
+    if (!this.bubble) return;
+    this.paint();
+    this.place();
+    this.updateDimensions();
+    this.applyVisibility();
   }
 
   destroy(): boolean {
@@ -585,9 +753,10 @@ export class ECODrIxWidget {
     document.documentElement.removeAttribute("data-ecodrix-open");
     if (this.iframe) this.iframe.remove();
     this.iframe = null;
-    if (this.bubbleContainer) this.bubbleContainer.remove();
+    if (this.container) this.container.remove();
     if (this.autoOpenTimeout) clearTimeout(this.autoOpenTimeout);
     if (this.configTimeout) clearTimeout(this.configTimeout);
+    if (this.nudgeTimeout) clearTimeout(this.nudgeTimeout);
     const styles = document.getElementById("ecodrix-widget-styles");
     if (styles) styles.remove();
     activeWidget = null;
