@@ -22,6 +22,10 @@
  *                                                  "own button", the welcome
  *                                                  nudge, and `hidden` (chat
  *                                                  off, or this site isn't listed)
+ *   frame → widget  CHAT_WIDGET_UNREAD { count }   replies that came in while the
+ *                                                  chat was closed (0 on open):
+ *                                                  a badge on the button, the count
+ *                                                  in its accessible name (2.3)
  *   widget → frame  OPEN                           the visitor opened the chat
  *                                                  (again on CONFIG if already
  *                                                  open): the frame goes live
@@ -231,6 +235,8 @@ export class ECODrIxWidget {
   /** Set while running: removes every window listener on destroy. */
   private listeners: AbortController | null = null;
   private isOpen = false;
+  /** Replies the visitor hasn't seen (from the frame); drawn as a badge while closed. */
+  private unread = 0;
   /** The frame said: chat off, or this website isn't on the business's list. */
   private hidden = false;
 
@@ -350,6 +356,14 @@ export class ECODrIxWidget {
         font: 700 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         transition: transform .18s ease, box-shadow .18s ease;
         -webkit-tap-highlight-color: transparent;
+        position: relative;
+      }
+      [data-ecodrix-badge] {
+        position: absolute; top: -4px; right: -4px; box-sizing: border-box;
+        min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
+        background: #c8102e; color: #fff; border: 2px solid #fff;
+        font: 700 11px/16px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        text-align: center; pointer-events: none;
       }
       [data-ecodrix-bubble]:hover { transform: translateY(-1px); }
       [data-ecodrix-bubble]:active { transform: scale(.97); }
@@ -471,9 +485,24 @@ export class ECODrIxWidget {
       span.textContent = c.label;
       this.bubble.appendChild(span);
     }
+    const unread = this.isOpen ? 0 : this.unread;
+    if (unread > 0) {
+      // The count is in the accessible name; the dot itself is decoration.
+      const badge = document.createElement("span");
+      badge.setAttribute("data-ecodrix-badge", "");
+      badge.setAttribute("aria-hidden", "true");
+      badge.textContent = unread > 9 ? "9+" : String(unread);
+      this.bubble.appendChild(badge);
+    }
     this.bubble.setAttribute(
       "aria-label",
-      this.isOpen ? "Close chat" : words ? c.label : c.tooltipText,
+      this.isOpen
+        ? "Close chat"
+        : unread > 0
+          ? `Open chat, ${unread} unread ${unread === 1 ? "message" : "messages"}`
+          : words
+            ? c.label
+            : c.tooltipText,
     );
   }
 
@@ -518,6 +547,7 @@ export class ECODrIxWidget {
     this.postPage();
     document.documentElement.setAttribute("data-ecodrix-open", "");
     this.isOpen = true;
+    this.unread = 0;
     this.iframe.style.opacity = "1";
     this.iframe.style.transform = "none";
     this.iframe.style.pointerEvents = "auto";
@@ -561,6 +591,12 @@ export class ECODrIxWidget {
     const data = event.data as Record<string, unknown> | null;
     if (data?.type === "CHAT_WIDGET_CLOSE") this.hideIframe();
     else if (data?.type === "CONFIG") this.applyFrameConfig(data);
+    else if (data?.type === "CHAT_WIDGET_UNREAD") {
+      // Untrusted shape: a whole number from 0 up, kept under 1000.
+      const n = data.count;
+      this.unread = typeof n === "number" && Number.isInteger(n) && n > 0 ? Math.min(n, 999) : 0;
+      if (this.bubble) this.paint();
+    }
   }
 
   /** The business's saved look from the frame; malformed values are ignored. */

@@ -406,3 +406,35 @@ describe("the business's look (Look tab, 10 Nov 2026)", () => {
     expect(nudge()).toBeNull();
   });
 });
+
+describe("unread badge (CHAT_WIDGET_UNREAD, 2.3)", () => {
+  it("draws the count (9+ above nine), names it on the button, clears on open", async () => {
+    await load({ erix: "ACME" });
+    const badge = () => bubble().querySelector<HTMLElement>("[data-ecodrix-badge]");
+    expect(badge()).toBeNull();
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 3 });
+    expect(badge()?.textContent).toBe("3");
+    expect(badge()?.getAttribute("aria-hidden")).toBe("true");
+    expect(bubble().getAttribute("aria-label")).toBe("Open chat, 3 unread messages");
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 1 });
+    expect(bubble().getAttribute("aria-label")).toBe("Open chat, 1 unread message");
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 12 });
+    expect(badge()?.textContent).toBe("9+");
+    widget().show();
+    expect(badge()).toBeNull();
+    expect(bubble().getAttribute("aria-label")).toBe("Close chat");
+  });
+
+  it("0 hides it; bad counts and other origins or windows are ignored", async () => {
+    await load({ erix: "ACME" });
+    const badge = () => bubble().querySelector("[data-ecodrix-badge]");
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 2 });
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 0 });
+    expect(badge()).toBeNull();
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 5 }, { origin: "https://evil.example" });
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 5 }, { source: window });
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: "5" });
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: -1 });
+    expect(badge()).toBeNull();
+  });
+});
