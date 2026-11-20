@@ -26,6 +26,13 @@
  *                                                  chat was closed (0 on open):
  *                                                  a badge on the button, the count
  *                                                  in its accessible name (2.3)
+ *   frame → widget  CHAT_WIDGET_ACTIVE             the visitor's thread has messages:
+ *                                                  the loader remembers it on the host
+ *                                                  (`erix-active:<code>`) and next time
+ *                                                  loads the frame on idle (2.4)
+ *   widget → frame  INIT { greeting }              "shown" | "holdout" | null: the
+ *                                                  page greeting bucket, sent with the
+ *                                                  first message (2.4)
  *   widget → frame  OPEN                           the visitor opened the chat
  *                                                  (again on CONFIG if already
  *                                                  open): the frame goes live
@@ -34,6 +41,15 @@
  *   widget → frame  PAGE { path, title }           on open, on CONFIG and on
  *                                                  popstate/hashchange; path
  *                                                  only (no query or hash)
+ *
+ * Facade (2.4): only the button (plain DOM) loads at first, from
+ * `GET <api>/v1/api/infra/connect/webhooks/webchat/<code>/launcher` (plain `fetch`, cached 5 min in
+ * sessionStorage; the loader stays tiny and never loads the SDK). The iframe
+ * is created on the first click, or on idle for a returning chatter. An older
+ * server without that route gets the 2.3 behaviour (frame preloaded, CONFIG).
+ * Greetings by page (8 s, once per visitor per path, 1-in-10 holdout, one
+ * `sendBeacon` per visit and path) and `avoidSelectors` (the button and bubble
+ * lift above visible fixed or sticky bottom elements) come from the same read.
  *
  * On phones (viewport ≤ 480 px) the open chat is a full-screen sheet inside
  * the safe area, and the host page doesn't scroll behind it.
@@ -102,6 +118,8 @@ export interface ECODrIxWidgetConfig {
   ownButton?: boolean;
   /** A small message above the button after `delay` seconds, once per visit. */
   nudge?: { text: string; delay: number } | null;
+  /** API origin for the launcher read. Default: `console.` host becomes `api.`; localhost :4000. */
+  apiUrl?: string;
   /** Chat window width in px (default 380, kept inside the viewport). */
   iframeWidth?: number;
   /** Chat window height in px (default 600, kept inside the viewport). */
@@ -179,6 +197,89 @@ function frameOrigin(url: string | undefined): string {
 const CONFIG_TIMEOUT_MS = 3000;
 const HEX = /^#[0-9a-f]{6}$/i;
 const NUDGE_KEY = "ecodrix-nudge-seen";
+const LAUNCHER_TTL_MS = 5 * 60 * 1000;
+const GREET_DELAY_MS = 8000;
+const IDLE_FALLBACK_MS = 4000;
+
+/** What `GET .../launcher` gives besides the look (same field names as the frame's widget read). */
+interface Greeting {
+  path: string;
+  text: string;
+}
+
+/** Stable 32-bit FNV-1a hash of a string. */
+export function hash32(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+/** Holdout: 1 in 10 visitors, stable per visitor id. */
+export const inHoldout = (vid: string): boolean => hash32(vid) % 10 === 0;
+
+/** The greeting whose path is the longest prefix of `path`, or null. */
+export function pickGreeting(path: string, list: readonly Greeting[]): Greeting | null {
+  let best: Greeting | null = null;
+  for (const g of list)
+    if (path.startsWith(g.path) && (!best || g.path.length > best.path.length)) best = g;
+  return best;
+}
+
+/** Up to 5 CSS selectors, 100 chars each, no `<` or `{`; anything else is dropped. */
+export function cleanSelectors(v: unknown): string[] {
+  return Array.isArray(v)
+    ? v
+        .filter(
+          (s): s is string =>
+            typeof s === "string" && s.length > 0 && s.length <= 100 && !/[<{]/.test(s),
+        )
+        .slice(0, 5)
+    : [];
+}
+
+/**
+ * How many px the bottom launcher must rise: the tallest visible fixed or
+ * sticky element at the bottom edge that matches a selector (0 when none).
+ */
+export function liftFor(selectors: readonly string[]): number {
+  const vh = window.innerHeight;
+  let lift = 0;
+  for (const sel of selectors) {
+    let found: NodeListOf<Element>;
+    try {
+      found = document.querySelectorAll(sel);
+    } catch {
+      continue; // a selector the browser rejects
+    }
+    for (const el of Array.from(found)) {
+      const cs = getComputedStyle(el);
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
+      if (cs.position !== "fixed" && cs.position !== "sticky") continue;
+      const r = el.getBoundingClientRect();
+      if (r.height > 0 && r.width > 0 && r.top > vh * 0.4 && r.bottom > vh - 24)
+        lift = Math.max(lift, Math.ceil(vh - r.top));
+    }
+  }
+  return lift;
+}
+
+/** The public webchat routes, where the SDK's visitor client calls them. */
+const webchatBase = (api: string, code: string) =>
+  `${api}/v1/api/infra/connect/webhooks/webchat/${encodeURIComponent(code)}`;
+
+/** `console.x.com` becomes `api.x.com`; localhost gets :4000; anything else has no known API. */
+export function apiOrigin(baseUrl: string, apiUrl?: string): string {
+  if (apiUrl) return apiUrl.replace(/\/+$/, "");
+  try {
+    const u = new URL(baseUrl);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1")
+      return `${u.protocol}//${u.hostname}:4000`;
+    if (u.hostname.startsWith("console.")) return `${u.protocol}//api.${u.hostname.slice(8)}`;
+  } catch {
+    // fall through
+  }
+  return "";
+}
 
 /** White, unless white falls under `min` contrast on the colour (WCAG): then ink. */
 export function readableOn(hex: string, min = 3): string {
@@ -239,6 +340,18 @@ export class ECODrIxWidget {
   private unread = 0;
   /** The frame said: chat off, or this website isn't on the business's list. */
   private hidden = false;
+  private greetings: Greeting[] = [];
+  private greetingMeasure = true;
+  private avoidSelectors: string[] = [];
+  /** px the button sits above its configured offset (bottom corners only). */
+  private lift = 0;
+  private greetTimeout: ReturnType<typeof setTimeout> | null = null;
+  private liftTimer: ReturnType<typeof setTimeout> | null = null;
+  private observer: MutationObserver | null = null;
+  /** This visit's greeting bucket, passed to the frame for the first message. */
+  private greetBucket: "shown" | "holdout" | null = null;
+  /** The greeting rule waiting for its 8 s (or for an avoided element to go). */
+  private greetDue: Greeting | null = null;
 
   constructor(config: ECODrIxWidgetConfig) {
     if (activeWidget) return activeWidget;
@@ -257,8 +370,12 @@ export class ECODrIxWidget {
     this.listeners = new AbortController();
     const on = { signal: this.listeners.signal };
     window.addEventListener("message", (e) => this.onFrameMessage(e), on);
-    window.addEventListener("resize", () => this.updateDimensions(), on);
-    window.addEventListener("orientationchange", () => this.updateDimensions(), on);
+    const resized = () => {
+      this.updateDimensions();
+      this.recheck();
+    };
+    window.addEventListener("resize", resized, on);
+    window.addEventListener("orientationchange", resized, on);
     // A single-page site moved on: the chat gets the new page, and pages the
     // business hid take the chat away.
     // ponytail: history.pushState fires no event, so an SPA's in-app link
@@ -267,6 +384,7 @@ export class ECODrIxWidget {
     const moved = () => {
       this.postPage();
       this.applyVisibility();
+      this.scheduleGreeting();
     };
     window.addEventListener("popstate", moved, on);
     window.addEventListener("hashchange", moved, on);
@@ -297,14 +415,21 @@ export class ECODrIxWidget {
 
     this.addStyles();
     this.createBubble();
-    this.preloadIframe();
     this.paint();
     this.place();
-    // After the iframe exists — before, the phone sizing silently no-op'd.
-    this.updateDimensions();
-    // The button stays hidden until the frame sends the business's look
-    // (CONFIG), so it never flashes the wrong one; defaults after 3 s.
+    // The button stays hidden until the business's look arrives (the
+    // launcher read, or the frame's CONFIG on an older server), so it never
+    // flashes the wrong one; defaults after 3 s.
     this.configTimeout = setTimeout(() => this.reveal(), CONFIG_TIMEOUT_MS);
+    // Facade: no iframe yet. A returning chatter's frame loads on idle (its
+    // socket then carries the unread badge); everyone else's on the first click.
+    if (this.store("erix-active")) {
+      const idle = window.requestIdleCallback
+        ? (f: () => void) => window.requestIdleCallback(f)
+        : (f: () => void) => setTimeout(f, IDLE_FALLBACK_MS);
+      idle(() => this.ensureFrame());
+    }
+    void this.loadLauncher();
 
     if (this.config.autoOpen > 0) {
       this.autoOpenTimeout = setTimeout(() => this.showIframe(), this.config.autoOpen * 1000);
@@ -318,9 +443,10 @@ export class ECODrIxWidget {
 
   /** How far above the edge the chat window sits: just above the button. */
   private windowGap(): number {
+    const lift = this.config.bubblePosition.startsWith("bottom") ? this.lift : 0;
     return this.config.ownButton
-      ? this.config.offsetBottom
-      : this.config.offsetBottom + this.size() + 12;
+      ? this.config.offsetBottom + lift
+      : this.config.offsetBottom + lift + this.size() + 12;
   }
 
   updateDimensions(_width?: number, _height?: number): void {
@@ -371,20 +497,22 @@ export class ECODrIxWidget {
       [data-ecodrix-bubble] img { width: 58%; height: 58%; object-fit: contain; border-radius: 6px; pointer-events: none; }
       [data-ecodrix-bubble][data-shape="label"] img { width: 22px; height: 22px; }
       [data-ecodrix-nudge] {
-        position: absolute; display: flex; align-items: flex-start; gap: 6px;
-        width: max-content; max-width: 240px; padding: 10px 8px 10px 12px;
+        position: absolute; display: flex; align-items: center; gap: 2px;
+        width: max-content; max-width: 240px; padding: 0 0 0 12px;
         background: #fff; color: #161921; border-radius: 14px;
         box-shadow: 0 0 0 1px rgba(14,32,107,.08), 0 12px 32px -8px rgba(14,32,107,.3);
         font: 500 13px/18px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         animation: ecodrix-nudge-in .22s ease-out;
       }
-      [data-ecodrix-nudge] button { all: unset; cursor: pointer; }
+      [data-ecodrix-nudge] button { all: unset; cursor: pointer; box-sizing: border-box; min-height: 44px; display: inline-flex; align-items: center; }
       [data-ecodrix-nudge] [data-text]:focus-visible, [data-ecodrix-nudge] [data-dismiss]:focus-visible { outline: 2px solid #2b4dcb; outline-offset: 2px; border-radius: 4px; }
-      [data-ecodrix-nudge] [data-dismiss] { color: #575c67; padding: 0 4px; font-size: 16px; line-height: 16px; }
+      [data-ecodrix-nudge] [data-dismiss] { color: #575c67; justify-content: center; min-width: 44px; font-size: 18px; line-height: 18px; }
+      [data-ecodrix-launcher] { transition: bottom .2s ease; }
       @keyframes ecodrix-nudge-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       @media (prefers-reduced-motion: reduce) {
         [data-ecodrix-bubble], iframe[data-ecodrix-frame] { transition: none !important; }
         [data-ecodrix-nudge] { animation: none; }
+        [data-ecodrix-launcher] { transition: none; }
       }
       /* Phones: the open chat fills the screen inside the safe area (notch,
          home bar), above the button, and the page behind it doesn't scroll.
@@ -427,6 +555,10 @@ export class ECODrIxWidget {
     this.bubble.setAttribute("data-ecodrix-bubble", "");
     this.bubble.setAttribute("aria-label", this.config.tooltipText);
     this.bubble.setAttribute("aria-expanded", "false");
+    // Build the hidden frame as the visitor reaches for the button, so the
+    // first click doesn't show a blank frame. ensureFrame is a no-op after the first.
+    for (const ev of ["pointerenter", "focus", "touchstart"])
+      this.bubble.addEventListener(ev, () => this.ensureFrame(), { passive: true });
     this.bubble.addEventListener("click", (e) => {
       this.toggleIframe();
       // Keyboard users (Enter / Space: a click with no pointer) land in the
@@ -506,7 +638,15 @@ export class ECODrIxWidget {
     );
   }
 
-  private preloadIframe(): void {
+  /** The iframe, built on first need (click, idle, or an older server's preload). */
+  private ensureFrame(): void {
+    if (this.iframe || !this.listeners) return;
+    this.createFrame();
+    this.place();
+    this.updateDimensions();
+  }
+
+  private createFrame(): void {
     this.iframe = document.createElement("iframe");
     this.iframe.setAttribute("data-ecodrix-frame", "");
     this.iframe.src = this.config.botUrl as string;
@@ -538,12 +678,15 @@ export class ECODrIxWidget {
   }
 
   showIframe(): void {
-    if (!this.iframe || this.hidden) return;
+    if (this.hidden || !this.listeners) return;
+    this.ensureFrame();
+    if (!this.iframe) return;
     this.reveal();
     this.dropNudge(true);
-    // The frame opens its live connection only now (it's preloaded, hidden,
-    // on every page view).
+    // The frame opens its live connection only now. A frame created by this
+    // click isn't listening yet: its CONFIG makes us send OPEN again.
     this.post({ type: "OPEN" });
+    this.postInit();
     this.postPage();
     document.documentElement.setAttribute("data-ecodrix-open", "");
     this.isOpen = true;
@@ -596,7 +739,7 @@ export class ECODrIxWidget {
       const n = data.count;
       this.unread = typeof n === "number" && Number.isInteger(n) && n > 0 ? Math.min(n, 999) : 0;
       if (this.bubble) this.paint();
-    }
+    } else if (data?.type === "CHAT_WIDGET_ACTIVE") this.store("erix-active", "1");
   }
 
   /** The business's saved look from the frame; malformed values are ignored. */
@@ -642,7 +785,222 @@ export class ECODrIxWidget {
     // The frame is listening now (it sent this): an OPEN sent while it was
     // still loading was lost, and it needs the page.
     if (this.isOpen) this.post({ type: "OPEN" });
+    this.postInit();
     this.postPage();
+  }
+
+  /** The visit's greeting bucket for the frame (it sends it with the first message). */
+  private postInit(): void {
+    this.post({ type: "INIT", greeting: this.greetBucket });
+  }
+
+  private code(): string {
+    const c = this.config;
+    if (c.clientCode) return c.clientCode;
+    try {
+      return new URL(c.botUrl as string).searchParams.get("c") ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** Host localStorage `<name>:<code>[:<path>]`: read, or write when `v` is given. Null when blocked or empty. */
+  private store(name: string, v?: string, path?: string): string | null {
+    try {
+      const k = `${name}:${this.code()}${path ? `:${path}` : ""}`;
+      if (v === undefined) return window.localStorage.getItem(k);
+      window.localStorage.setItem(k, v);
+      return v;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The button's look, greetings and avoid list from the API, without the
+   * frame. Cached 5 min per tab. 403 = this site isn't on the business's list
+   * (hide). Any other failure (an older server, offline) = the 2.3 way: load
+   * the frame now and take its CONFIG.
+   */
+  private async loadLauncher(): Promise<void> {
+    const api = apiOrigin(this.config.baseUrl, this.config.apiUrl);
+    const code = this.code();
+    if (!api || !code) return this.ensureFrame();
+    const ck = `erix-launcher:${code}`;
+    let data: Record<string, unknown> | null = null;
+    try {
+      const hit = JSON.parse(sessionStorage.getItem(ck) ?? "null");
+      if (hit && Date.now() - hit.t < LAUNCHER_TTL_MS) data = hit.d;
+    } catch {
+      // No cache: read it.
+    }
+    if (!data) {
+      try {
+        const res = await fetch(`${webchatBase(api, code)}/launcher`, {
+          credentials: "omit",
+        });
+        if (res.status === 403) {
+          this.hidden = true;
+          this.applyVisibility();
+          this.reveal();
+          return;
+        }
+        if (!res.ok) throw new Error(String(res.status));
+        const body = await res.json();
+        data = body?.data ?? body;
+        try {
+          sessionStorage.setItem(ck, JSON.stringify({ t: Date.now(), d: data }));
+        } catch {
+          // Storage blocked: no cache.
+        }
+      } catch {
+        return this.ensureFrame();
+      }
+    }
+    if (!this.listeners || !data || typeof data !== "object") return;
+    this.applyLauncher(data);
+  }
+
+  /** Launcher read -> the frame's CONFIG shape, then the extras. Same checks as CONFIG. */
+  private applyLauncher(d: Record<string, unknown>): void {
+    const image =
+      d.launcherIcon === "logo" ? d.logoUrl : d.launcherIcon === "custom" ? d.launcherIconUrl : "";
+    const icon = typeof d.launcherIcon === "string" ? d.launcherIcon : "chat";
+    this.applyFrameConfig({
+      color: d.color,
+      position: d.position,
+      shape: d.launcherShape,
+      label: d.launcherLabel,
+      size: d.launcherSize,
+      icon: image ? "image" : icon === "logo" || icon === "custom" ? "chat" : icon,
+      iconUrl: image,
+      offsetBottom: d.offsetBottom,
+      offsetSide: d.offsetSide,
+      hiddenPaths: d.hiddenPaths,
+      ownButton: d.ownButton,
+      nudge: d.nudgeText ? { text: d.nudgeText, delay: d.nudgeDelay } : null,
+      hidden: d.hidden,
+    });
+    this.greetings = Array.isArray(d.greetings)
+      ? (d.greetings as Record<string, unknown>[])
+          .filter(
+            (g) =>
+              g &&
+              typeof g.path === "string" &&
+              /^\/\S{0,99}$/.test(g.path) &&
+              typeof g.text === "string" &&
+              g.text.trim(),
+          )
+          .slice(0, 10)
+          .map((g) => ({ path: g.path as string, text: (g.text as string).trim().slice(0, 120) }))
+      : [];
+    this.greetingMeasure = d.greetingMeasure !== false;
+    this.avoidSelectors = cleanSelectors(d.avoidSelectors);
+    if (this.avoidSelectors.length && typeof MutationObserver !== "undefined" && !this.observer) {
+      this.observer = new MutationObserver((rs) => {
+        // Our own button and bubble moving isn't news.
+        if (rs.some((r) => !this.container?.contains(r.target) && r.target !== this.iframe))
+          this.recheck();
+      });
+      this.observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "style", "hidden"],
+      });
+    }
+    this.lift = 0;
+    this.recheck(true);
+    this.scheduleGreeting();
+  }
+
+  /** Re-measure the avoided elements: at most every 250 ms (`now` skips the wait). */
+  private recheck(now = false): void {
+    if (!this.avoidSelectors.length || !this.container) return;
+    if (this.liftTimer && !now) return;
+    if (this.liftTimer) clearTimeout(this.liftTimer);
+    const run = () => {
+      this.liftTimer = null;
+      const next = this.config.bubblePosition.startsWith("top") ? 0 : liftFor(this.avoidSelectors);
+      if (next !== this.lift) {
+        this.lift = next;
+        this.place();
+        this.updateDimensions();
+      }
+      this.tryGreet();
+    };
+    if (now) run();
+    else this.liftTimer = setTimeout(run, 250);
+  }
+
+  /** Queue this page's greeting: after 8 s, once per visitor per path rule. */
+  private scheduleGreeting(): void {
+    if (this.greetTimeout) clearTimeout(this.greetTimeout);
+    this.greetTimeout = null;
+    this.greetDue = null;
+    const g = pickGreeting(window.location.pathname, this.greetings);
+    // Already decided for this visitor and path. (No storage: tryGreet stays quiet.)
+    if (!g || this.store("erix-greet", undefined, g.path) !== null) return;
+    this.greetTimeout = setTimeout(() => {
+      this.greetDue = g;
+      this.tryGreet();
+    }, GREET_DELAY_MS);
+  }
+
+  /**
+   * The due greeting runs once the button is showing, the chat is closed and
+   * no avoided element (a cookie bar) is on screen. The holdout visitor goes
+   * through the same gate and is counted, but sees nothing.
+   */
+  private tryGreet(): void {
+    const g = this.greetDue;
+    if (!g || this.isOpen || this.hidden || this.container?.style.display === "none") return;
+    if (this.avoidSelectors.length && liftFor(this.avoidSelectors) > 0) return;
+    const vid = this.visitorId();
+    if (!vid) return;
+    this.greetDue = null;
+    const holdout = this.greetingMeasure && inHoldout(vid);
+    this.store("erix-greet", holdout ? "holdout" : "shown", g.path);
+    if (this.greetingMeasure) {
+      this.greetBucket = holdout ? "holdout" : "shown";
+      this.postInit();
+      this.beacon(vid, this.greetBucket, g.path);
+    }
+    if (!holdout) {
+      this.dropNudge(true);
+      this.showNudge(g.text, true);
+    }
+  }
+
+  /** A random id kept on the host, or null when storage is blocked. */
+  private visitorId(): string | null {
+    const have = this.store("erix-vid");
+    if (have) return have;
+    const id =
+      window.crypto?.randomUUID?.() ??
+      `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    return this.store("erix-vid", id);
+  }
+
+  /** One count per visit and path: `sendBeacon`, or a keepalive `fetch`. */
+  private beacon(vid: string, bucket: string, path: string): void {
+    const api = apiOrigin(this.config.baseUrl, this.config.apiUrl);
+    if (!api) return;
+    const url = `${webchatBase(api, this.code())}/greeting-stat`;
+    const body = JSON.stringify({ vid, bucket, path });
+    try {
+      if (navigator.sendBeacon?.(url, new Blob([body], { type: "text/plain;charset=UTF-8" })))
+        return;
+    } catch {
+      // Fall through to fetch.
+    }
+    fetch(url, {
+      method: "POST",
+      body,
+      keepalive: true,
+      credentials: "omit",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+    }).catch(() => {});
   }
 
   /** Off, on a hidden page, or "own button": the button (and chat) step aside. */
@@ -668,10 +1026,12 @@ export class ECODrIxWidget {
     this.nudgeTimeout = setTimeout(() => this.showNudge(n.text), n.delay * 1000);
   }
 
-  private showNudge(text: string): void {
+  /** The welcome nudge, or (greeting) a page greeting: same bubble, its own dismiss label. */
+  private showNudge(text: string, greeting = false): void {
     if (this.isOpen || this.container.style.display === "none") return;
     const box = document.createElement("div");
     box.setAttribute("data-ecodrix-nudge", "");
+    if (greeting) box.setAttribute("data-greeting", "");
     box.setAttribute("role", "status");
     const open = document.createElement("button");
     open.type = "button";
@@ -681,7 +1041,7 @@ export class ECODrIxWidget {
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.setAttribute("data-dismiss", "");
-    dismiss.setAttribute("aria-label", "Dismiss");
+    dismiss.setAttribute("aria-label", greeting ? "Close greeting" : "Dismiss");
     dismiss.textContent = "×";
     dismiss.addEventListener("click", () => this.dropNudge(true));
     box.append(open, dismiss);
@@ -721,7 +1081,7 @@ export class ECODrIxWidget {
     ];
     const box = this.container.style;
     box.top = box.bottom = box.left = box.right = "";
-    box[vertical] = `${this.config.offsetBottom}px`;
+    box[vertical] = `${this.config.offsetBottom + (vertical === "bottom" ? this.lift : 0)}px`;
     box[side] = `${this.config.offsetSide}px`;
     if (this.iframe) {
       const f = this.iframe.style;
@@ -793,6 +1153,11 @@ export class ECODrIxWidget {
     if (this.autoOpenTimeout) clearTimeout(this.autoOpenTimeout);
     if (this.configTimeout) clearTimeout(this.configTimeout);
     if (this.nudgeTimeout) clearTimeout(this.nudgeTimeout);
+    if (this.greetTimeout) clearTimeout(this.greetTimeout);
+    if (this.liftTimer) clearTimeout(this.liftTimer);
+    this.liftTimer = this.greetTimeout = null;
+    this.observer?.disconnect();
+    this.observer = null;
     const styles = document.getElementById("ecodrix-widget-styles");
     if (styles) styles.remove();
     activeWidget = null;

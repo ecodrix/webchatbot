@@ -9,9 +9,19 @@
 
 const FRAME_ORIGIN = "https://console.ecodrix.com";
 
+/**
+ * No launcher route (an older server, or offline): the loader falls back to
+ * the 2.3 way, frame preloaded. Synchronous on purpose, so the legacy tests
+ * below see the iframe right after init.
+ */
+const offline = () => {
+  throw new Error("offline");
+};
+
 /** A fresh copy of the module, run as if from `<script data-erix=…>`. */
-async function load(script?: { erix?: string }) {
+async function load(script?: { erix?: string }, fetchImpl: unknown = offline) {
   vi.resetModules();
+  vi.stubGlobal("fetch", fetchImpl);
   let el: HTMLScriptElement | null = null;
   if (script) {
     el = document.createElement("script");
@@ -52,6 +62,8 @@ afterEach(() => {
   document.body.innerHTML = "";
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
 describe("one-line embed", () => {
@@ -436,5 +448,290 @@ describe("unread badge (CHAT_WIDGET_UNREAD, 2.3)", () => {
     fromFrame({ type: "CHAT_WIDGET_UNREAD", count: "5" });
     fromFrame({ type: "CHAT_WIDGET_UNREAD", count: -1 });
     expect(badge()).toBeNull();
+  });
+});
+
+// ── 2.4: facade, greetings, holdout, avoidSelectors ────────────────────────
+
+const LAUNCHER = {
+  color: "#0f766e",
+  position: "right",
+  greetings: [
+    { path: "/", text: "Welcome" },
+    { path: "/pricing", text: "Questions about price?" },
+  ],
+  greetingMeasure: true,
+  avoidSelectors: ["#cookie"],
+};
+const okFetch = (data: unknown = LAUNCHER) =>
+  vi.fn(async (..._a: unknown[]) => ({ ok: true, status: 200, json: async () => ({ data }) }));
+const flush = () => vi.advanceTimersByTimeAsync(0);
+const greeting = () => document.querySelector<HTMLElement>("[data-greeting]");
+
+/** A visitor id that the holdout hash does (or does not) pick. */
+function vidWhere(holdout: boolean, hash: (s: string) => number): string {
+  for (let i = 0; ; i++) if ((hash(`v${i}`) % 10 === 0) === holdout) return `v${i}`;
+}
+async function pinVid(holdout: boolean) {
+  const { hash32 } = await import("../src/index");
+  localStorage.setItem("erix-vid:ACME", vidWhere(holdout, hash32));
+}
+
+async function startFake(data: unknown = LAUNCHER, path = "/") {
+  vi.useFakeTimers();
+  window.history.replaceState({}, "", path);
+  const fetchMock = okFetch(data);
+  await load({ erix: "ACME" }, fetchMock);
+  await flush();
+  return { fetchMock };
+}
+const restart = () => {
+  window.ECODrIx?.destroy();
+  delete window.ECODrIx;
+  sessionStorage.clear();
+};
+
+describe("launcher facade", () => {
+  it("shows the button from the launcher read and builds no iframe until the first click", async () => {
+    const { fetchMock } = await startFake();
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.ecodrix.com/v1/api/infra/connect/webhooks/webchat/ACME/launcher",
+    );
+    expect(container().style.visibility).toBe("");
+    expect(bubble().style.background).toMatch(/#0f766e|rgb\(15, 118, 110\)/i);
+    expect(document.querySelector("iframe")).toBeNull();
+    bubble().click();
+    expect(iframe().src).toBe(`${FRAME_ORIGIN}/widget-frame?c=ACME`);
+    expect(widget().isOpen()).toBe(true);
+  });
+
+  it("prefetch: the hidden frame is built once on pointerenter, focus or touchstart; click still opens", async () => {
+    await startFake();
+    expect(document.querySelector("iframe")).toBeNull();
+    bubble().dispatchEvent(new Event("pointerenter"));
+    const f = iframe();
+    expect(f.style.opacity).toBe("0");
+    expect(widget().isOpen()).toBe(false);
+    bubble().dispatchEvent(new Event("focus"));
+    bubble().dispatchEvent(new Event("touchstart"));
+    expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    bubble().click();
+    expect(iframe()).toBe(f);
+    expect(widget().isOpen()).toBe(true);
+  });
+
+  it("opening before the frame loads: OPEN is sent again when its CONFIG arrives", async () => {
+    await startFake();
+    bubble().click();
+    const post = vi
+      .spyOn(iframe().contentWindow as Window, "postMessage")
+      .mockImplementation(() => {});
+    fromFrame({ type: "CONFIG", color: "#0f766e" });
+    expect(post.mock.calls.some(([d]) => (d as { type: string }).type === "OPEN")).toBe(true);
+  });
+
+  it("caches the read for 5 minutes in sessionStorage", async () => {
+    const { fetchMock } = await startFake();
+    window.ECODrIx?.destroy();
+    delete window.ECODrIx;
+    await load({ erix: "ACME" }, fetchMock);
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(container().style.visibility).toBe("");
+  });
+
+  it("403 (this site is not listed) hides the button; other failures fall back to the preloaded frame", async () => {
+    vi.useFakeTimers();
+    await load(
+      { erix: "ACME" },
+      vi.fn(async () => ({ ok: false, status: 403 })),
+    );
+    await flush();
+    expect(container().style.display).toBe("none");
+    expect(document.querySelector("iframe")).toBeNull();
+    restart();
+    await load(
+      { erix: "ACME" },
+      vi.fn(async () => ({ ok: false, status: 404 })),
+    );
+    await flush();
+    expect(document.querySelector("iframe")).not.toBeNull();
+  });
+
+  it("a returning chatter (erix-active flag) gets the frame on idle, others never", async () => {
+    vi.useFakeTimers();
+    localStorage.setItem("erix-active:ACME", "1");
+    await load({ erix: "ACME" }, okFetch());
+    await flush();
+    expect(document.querySelector("iframe")).toBeNull();
+    vi.advanceTimersByTime(4000);
+    expect(document.querySelector("iframe")).not.toBeNull();
+    restart();
+    localStorage.clear();
+    await load({ erix: "ACME" }, okFetch());
+    await flush();
+    vi.advanceTimersByTime(30000);
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+
+  it("CHAT_WIDGET_ACTIVE sets the flag, only from the frame's origin and window", async () => {
+    await load({ erix: "ACME" });
+    fromFrame({ type: "CHAT_WIDGET_ACTIVE" }, { origin: "https://evil.example" });
+    fromFrame({ type: "CHAT_WIDGET_ACTIVE" }, { source: window });
+    expect(localStorage.getItem("erix-active:ACME")).toBeNull();
+    fromFrame({ type: "CHAT_WIDGET_ACTIVE" });
+    expect(localStorage.getItem("erix-active:ACME")).toBe("1");
+  });
+
+  it("the unread badge still works with a frame that was built later", async () => {
+    await startFake();
+    bubble().click();
+    fromFrame({ type: "CHAT_WIDGET_CLOSE" });
+    fromFrame({ type: "CHAT_WIDGET_UNREAD", count: 2 });
+    expect(bubble().getAttribute("aria-label")).toBe("Open chat, 2 unread messages");
+  });
+});
+
+describe("greetings by page", () => {
+  it("none before 8 s, then once: longest matching path, a labelled close, role=status", async () => {
+    await pinVid(false);
+    await startFake(LAUNCHER, "/pricing/plans");
+    vi.advanceTimersByTime(7999);
+    expect(greeting()).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(greeting()?.textContent).toContain("Questions about price?");
+    expect(greeting()?.getAttribute("role")).toBe("status");
+    const close = greeting()?.querySelector("[data-dismiss]");
+    expect(close?.getAttribute("aria-label")).toBe("Close greeting");
+    (close as HTMLElement).click();
+    expect(greeting()).toBeNull();
+    expect(localStorage.getItem("erix-greet:ACME:/pricing")).toBe("shown");
+  });
+
+  it("not again for the same visitor and path; another path rule still shows", async () => {
+    await pinVid(false);
+    localStorage.setItem("erix-greet:ACME:/pricing", "shown");
+    await startFake(LAUNCHER, "/pricing");
+    vi.advanceTimersByTime(9000);
+    expect(greeting()).toBeNull();
+    restart();
+    await startFake(LAUNCHER, "/about");
+    vi.advanceTimersByTime(8000);
+    expect(greeting()?.textContent).toContain("Welcome");
+  });
+
+  it("holdout (hash % 10 === 0): no bubble, still counted, bucket sent to the frame", async () => {
+    await pinVid(true);
+    const beacon = vi.fn((..._a: unknown[]) => true);
+    Object.defineProperty(navigator, "sendBeacon", { value: beacon, configurable: true });
+    await startFake(LAUNCHER, "/pricing");
+    vi.advanceTimersByTime(8000);
+    expect(greeting()).toBeNull();
+    expect(beacon).toHaveBeenCalledTimes(1);
+    const [url, blob] = beacon.mock.calls[0] as unknown as [string, Blob];
+    expect(url).toBe(
+      "https://api.ecodrix.com/v1/api/infra/connect/webhooks/webchat/ACME/greeting-stat",
+    );
+    expect(blob.type).toMatch(/^text\/plain/i);
+    bubble().click();
+    const post = vi
+      .spyOn(iframe().contentWindow as Window, "postMessage")
+      .mockImplementation(() => {});
+    fromFrame({ type: "CONFIG" });
+    expect(post).toHaveBeenCalledWith({ type: "INIT", greeting: "holdout" }, FRAME_ORIGIN);
+    // Decided once: the next page view neither counts nor greets again.
+    expect(localStorage.getItem("erix-greet:ACME:/pricing")).toBe("holdout");
+    delete (navigator as { sendBeacon?: unknown }).sendBeacon;
+  });
+
+  it("shown bucket: one count, by keepalive fetch when sendBeacon is missing", async () => {
+    await pinVid(false);
+    const { fetchMock } = await startFake(LAUNCHER, "/pricing");
+    vi.advanceTimersByTime(8000);
+    const counts = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/greeting-stat"));
+    expect(counts).toHaveLength(1);
+    const init = counts[0][1] as RequestInit;
+    expect(init).toMatchObject({ method: "POST", keepalive: true });
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
+      "text/plain;charset=UTF-8",
+    );
+    expect(JSON.parse(String(init.body))).toMatchObject({ bucket: "shown", path: "/pricing" });
+  });
+
+  it("measure off: no holdout, no count, everyone sees the greeting", async () => {
+    await pinVid(true);
+    const { fetchMock } = await startFake({ ...LAUNCHER, greetingMeasure: false }, "/pricing");
+    vi.advanceTimersByTime(8000);
+    expect(greeting()).not.toBeNull();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/greeting-stat"))).toBe(false);
+  });
+
+  it("waits while an avoided element is on screen", async () => {
+    await pinVid(false);
+    const bar = document.createElement("div");
+    bar.id = "cookie";
+    bar.style.position = "fixed";
+    bar.getBoundingClientRect = () =>
+      ({ top: 700, bottom: 768, height: 68, width: 300 }) as DOMRect;
+    document.body.appendChild(bar);
+    await startFake(LAUNCHER, "/pricing");
+    vi.advanceTimersByTime(9000);
+    expect(greeting()).toBeNull();
+    bar.remove();
+    window.dispatchEvent(new Event("resize"));
+    vi.advanceTimersByTime(300);
+    expect(greeting()).not.toBeNull();
+  });
+});
+
+describe("avoidSelectors", () => {
+  const bar = (top: number) => {
+    const el = document.createElement("div");
+    el.id = "cookie";
+    el.style.position = "fixed";
+    el.getBoundingClientRect = () =>
+      ({ top, bottom: 768, height: 768 - top, width: 300 }) as DOMRect;
+    document.body.appendChild(el);
+    return el;
+  };
+
+  it("lifts the button above a visible fixed bottom element and drops back when it goes", async () => {
+    const el = bar(700);
+    await startFake();
+    // 768 (jsdom viewport) - 700 = 68 px above the 20 px offset.
+    expect(container().style.bottom).toBe("88px");
+    el.remove();
+    window.dispatchEvent(new Event("resize"));
+    vi.advanceTimersByTime(300);
+    expect(container().style.bottom).toBe("20px");
+  });
+
+  it("rechecks through the MutationObserver when the page adds the element", async () => {
+    await startFake();
+    expect(container().style.bottom).toBe("20px");
+    bar(700);
+    await flush();
+    vi.advanceTimersByTime(300);
+    expect(container().style.bottom).toBe("88px");
+  });
+
+  it("ignores hidden, non-fixed and top-of-page matches, and bad selectors", async () => {
+    const { liftFor } = await import("../src/index");
+    const el = bar(700);
+    el.style.position = "static";
+    expect(liftFor(["#cookie", "<bad", "###"])).toBe(0);
+    el.style.position = "fixed";
+    el.style.display = "none";
+    expect(liftFor(["#cookie"])).toBe(0);
+    el.style.display = "";
+    el.getBoundingClientRect = () => ({ top: 0, bottom: 60, height: 60, width: 300 }) as DOMRect;
+    expect(liftFor(["#cookie"])).toBe(0);
+  });
+
+  it("selectors: at most 5, 100 chars, no < or {", async () => {
+    const { cleanSelectors } = await import("../src/index");
+    const out = cleanSelectors(["#a", ".b", "x{y}", "<z", "p".repeat(101), "#c", "#d", "#e", "#f"]);
+    expect(out).toEqual(["#a", ".b", "#c", "#d", "#e"]);
+    expect(cleanSelectors("nope")).toEqual([]);
   });
 });
