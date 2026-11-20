@@ -43,7 +43,7 @@
  *                                                  only (no query or hash)
  *
  * Facade (2.4): only the button (plain DOM) loads at first, from
- * `GET <api>/webhooks/webchat/<code>/launcher` (plain `fetch`, cached 5 min in
+ * `GET <api>/v1/api/infra/connect/webhooks/webchat/<code>/launcher` (plain `fetch`, cached 5 min in
  * sessionStorage; the loader stays tiny and never loads the SDK). The iframe
  * is created on the first click, or on idle for a returning chatter. An older
  * server without that route gets the 2.3 behaviour (frame preloaded, CONFIG).
@@ -262,6 +262,10 @@ export function liftFor(selectors: readonly string[]): number {
   }
   return lift;
 }
+
+/** The public webchat routes, where the SDK's visitor client calls them. */
+const webchatBase = (api: string, code: string) =>
+  `${api}/v1/api/infra/connect/webhooks/webchat/${encodeURIComponent(code)}`;
 
 /** `console.x.com` becomes `api.x.com`; localhost gets :4000; anything else has no known API. */
 export function apiOrigin(baseUrl: string, apiUrl?: string): string {
@@ -828,7 +832,7 @@ export class ECODrIxWidget {
     }
     if (!data) {
       try {
-        const res = await fetch(`${api}/webhooks/webchat/${encodeURIComponent(code)}/launcher`, {
+        const res = await fetch(`${webchatBase(api, code)}/launcher`, {
           credentials: "omit",
         });
         if (res.status === 403) {
@@ -978,7 +982,7 @@ export class ECODrIxWidget {
   private beacon(vid: string, bucket: string, path: string): void {
     const api = apiOrigin(this.config.baseUrl, this.config.apiUrl);
     if (!api) return;
-    const url = `${api}/webhooks/webchat/${encodeURIComponent(this.code())}/greeting-stat`;
+    const url = `${webchatBase(api, this.code())}/greeting-stat`;
     const body = JSON.stringify({ vid, bucket, path });
     try {
       if (navigator.sendBeacon?.(url, new Blob([body], { type: "application/json" }))) return;

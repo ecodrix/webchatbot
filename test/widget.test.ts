@@ -495,7 +495,7 @@ describe("launcher facade", () => {
   it("shows the button from the launcher read and builds no iframe until the first click", async () => {
     const { fetchMock } = await startFake();
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://api.ecodrix.com/webhooks/webchat/ACME/launcher",
+      "https://api.ecodrix.com/v1/api/infra/connect/webhooks/webchat/ACME/launcher",
     );
     expect(container().style.visibility).toBe("");
     expect(bubble().style.background).toMatch(/#0f766e|rgb\(15, 118, 110\)/i);
@@ -614,7 +614,9 @@ describe("greetings by page", () => {
     expect(greeting()).toBeNull();
     expect(beacon).toHaveBeenCalledTimes(1);
     const [url, blob] = beacon.mock.calls[0] as unknown as [string, Blob];
-    expect(url).toBe("https://api.ecodrix.com/webhooks/webchat/ACME/greeting-stat");
+    expect(url).toBe(
+      "https://api.ecodrix.com/v1/api/infra/connect/webhooks/webchat/ACME/greeting-stat",
+    );
     expect(blob.type).toBe("application/json");
     bubble().click();
     const post = vi
