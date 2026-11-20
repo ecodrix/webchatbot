@@ -505,6 +505,21 @@ describe("launcher facade", () => {
     expect(widget().isOpen()).toBe(true);
   });
 
+  it("prefetch: the hidden frame is built once on pointerenter, focus or touchstart; click still opens", async () => {
+    await startFake();
+    expect(document.querySelector("iframe")).toBeNull();
+    bubble().dispatchEvent(new Event("pointerenter"));
+    const f = iframe();
+    expect(f.style.opacity).toBe("0");
+    expect(widget().isOpen()).toBe(false);
+    bubble().dispatchEvent(new Event("focus"));
+    bubble().dispatchEvent(new Event("touchstart"));
+    expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    bubble().click();
+    expect(iframe()).toBe(f);
+    expect(widget().isOpen()).toBe(true);
+  });
+
   it("opening before the frame loads: OPEN is sent again when its CONFIG arrives", async () => {
     await startFake();
     bubble().click();
@@ -617,7 +632,7 @@ describe("greetings by page", () => {
     expect(url).toBe(
       "https://api.ecodrix.com/v1/api/infra/connect/webhooks/webchat/ACME/greeting-stat",
     );
-    expect(blob.type).toBe("application/json");
+    expect(blob.type).toBe("text/plain;charset=UTF-8");
     bubble().click();
     const post = vi
       .spyOn(iframe().contentWindow as Window, "postMessage")
@@ -637,6 +652,9 @@ describe("greetings by page", () => {
     expect(counts).toHaveLength(1);
     const init = counts[0][1] as RequestInit;
     expect(init).toMatchObject({ method: "POST", keepalive: true });
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
+      "text/plain;charset=UTF-8",
+    );
     expect(JSON.parse(String(init.body))).toMatchObject({ bucket: "shown", path: "/pricing" });
   });
 

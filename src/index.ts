@@ -555,6 +555,10 @@ export class ECODrIxWidget {
     this.bubble.setAttribute("data-ecodrix-bubble", "");
     this.bubble.setAttribute("aria-label", this.config.tooltipText);
     this.bubble.setAttribute("aria-expanded", "false");
+    // Build the hidden frame as the visitor reaches for the button, so the
+    // first click doesn't show a blank frame. ensureFrame is a no-op after the first.
+    for (const ev of ["pointerenter", "focus", "touchstart"])
+      this.bubble.addEventListener(ev, () => this.ensureFrame(), { passive: true });
     this.bubble.addEventListener("click", (e) => {
       this.toggleIframe();
       // Keyboard users (Enter / Space: a click with no pointer) land in the
@@ -985,7 +989,8 @@ export class ECODrIxWidget {
     const url = `${webchatBase(api, this.code())}/greeting-stat`;
     const body = JSON.stringify({ vid, bucket, path });
     try {
-      if (navigator.sendBeacon?.(url, new Blob([body], { type: "application/json" }))) return;
+      if (navigator.sendBeacon?.(url, new Blob([body], { type: "text/plain;charset=UTF-8" })))
+        return;
     } catch {
       // Fall through to fetch.
     }
@@ -994,7 +999,7 @@ export class ECODrIxWidget {
       body,
       keepalive: true,
       credentials: "omit",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
     }).catch(() => {});
   }
 
