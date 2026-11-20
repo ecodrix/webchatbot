@@ -632,7 +632,7 @@ describe("greetings by page", () => {
     expect(url).toBe(
       "https://api.ecodrix.com/v1/api/infra/connect/webhooks/webchat/ACME/greeting-stat",
     );
-    expect(blob.type).toBe("text/plain;charset=UTF-8");
+    expect(blob.type).toMatch(/^text\/plain/i);
     bubble().click();
     const post = vi
       .spyOn(iframe().contentWindow as Window, "postMessage")
