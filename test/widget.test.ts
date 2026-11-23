@@ -358,6 +358,24 @@ describe("the business's look (Look tab, 10 Nov 2026)", () => {
     expect(bubble().textContent).not.toContain("Book a visit");
   });
 
+  it("hover tooltip: icon-only button names itself beside it, away from the edge; none on words or open", async () => {
+    await load({ erix: "ACME" });
+    fromFrame({ type: "CONFIG", color: "#2b4dcb", shape: "round", position: "left" });
+    const tip = () => bubble().querySelector<HTMLElement>("[data-ecodrix-tip]");
+    expect(tip()?.textContent).toBe("Chat with us");
+    // Decoration only: the button's own name says the same.
+    expect(tip()?.getAttribute("aria-hidden")).toBe("true");
+    expect(bubble().dataset.side).toBe("left");
+    // The owner's words, when written, are the tooltip.
+    fromFrame({ type: "CONFIG", color: "#2b4dcb", shape: "round", label: "Ask Dr. Rao" });
+    expect(tip()?.textContent).toBe("Ask Dr. Rao");
+    bubble().click();
+    expect(tip()).toBeNull();
+    bubble().click();
+    fromFrame({ type: "CONFIG", color: "#2b4dcb", shape: "label", label: "Book a visit" });
+    expect(tip()).toBeNull();
+  });
+
   it("an image icon only from https, never through innerHTML", async () => {
     await load({ erix: "ACME" });
     fromFrame({ type: "CONFIG", icon: "image", iconUrl: "javascript:alert(1)" });

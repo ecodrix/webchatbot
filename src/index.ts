@@ -92,11 +92,11 @@ export interface ECODrIxWidgetConfig {
   iconColor?: string;
   /** @deprecated No pulse any more; kept so old configs still type-check. */
   pulseColor?: string;
-  /** Accessible name of the button ("Chat with us"). */
+  /** Accessible name of the button and its hover tooltip ("Chat with us"); the button's words win when set. */
   tooltipText?: string;
-  /** @deprecated The hover tooltip was replaced by the welcome nudge. */
+  /** @deprecated The hover tooltip has the welcome nudge's fixed look. */
   tooltipColor?: string;
-  /** @deprecated The hover tooltip was replaced by the welcome nudge. */
+  /** @deprecated The hover tooltip has the welcome nudge's fixed look. */
   tooltipBgColor?: string;
   /** Button height in px (overrides `size`). */
   bubbleSize?: number;
@@ -496,6 +496,23 @@ export class ECODrIxWidget {
       [data-ecodrix-bubble]:focus-visible { outline: 3px solid rgba(43,77,203,.55); outline-offset: 3px; }
       [data-ecodrix-bubble] img { width: 58%; height: 58%; object-fit: contain; border-radius: 6px; pointer-events: none; }
       [data-ecodrix-bubble][data-shape="label"] img { width: 22px; height: 22px; }
+      /* The hover tooltip: beside the button, on the side away from the screen
+         edge. Mouse hover and keyboard focus only, so a tap on a phone never
+         leaves it stuck. The button's aria-label already says the same words. */
+      [data-ecodrix-tip] {
+        all: initial; position: absolute; top: 50%; box-sizing: border-box;
+        width: max-content; max-width: 220px; padding: 7px 12px; border-radius: 10px;
+        background: #161921; color: #fff; pointer-events: none;
+        font: 600 13px/18px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        opacity: 0; transform: translateY(-50%) scale(.96); transition: opacity .15s ease, transform .15s ease;
+      }
+      [data-ecodrix-bubble][data-side="right"] [data-ecodrix-tip] { right: calc(100% + 12px); }
+      [data-ecodrix-bubble][data-side="left"] [data-ecodrix-tip] { left: calc(100% + 12px); }
+      [data-ecodrix-bubble]:focus-visible [data-ecodrix-tip] { opacity: 1; transform: translateY(-50%); }
+      @media (hover: hover) {
+        [data-ecodrix-bubble]:hover [data-ecodrix-tip] { opacity: 1; transform: translateY(-50%); }
+      }
       [data-ecodrix-nudge] {
         position: absolute; display: flex; align-items: center; gap: 2px;
         width: max-content; max-width: 240px; padding: 0 0 0 12px;
@@ -513,6 +530,7 @@ export class ECODrIxWidget {
         [data-ecodrix-bubble], iframe[data-ecodrix-frame] { transition: none !important; }
         [data-ecodrix-nudge] { animation: none; }
         [data-ecodrix-launcher] { transition: none; }
+        [data-ecodrix-tip] { transition: none; }
       }
       /* Phones: the open chat fills the screen inside the safe area (notch,
          home bar), above the button, and the page behind it doesn't scroll.
@@ -616,6 +634,16 @@ export class ECODrIxWidget {
       const span = document.createElement("span");
       span.textContent = c.label;
       this.bubble.appendChild(span);
+    }
+    // Closed, icon only: the hover tooltip names it (the button's words when the owner wrote some).
+    const tip = (c.label || c.tooltipText).trim();
+    this.bubble.setAttribute("data-side", c.bubblePosition.endsWith("left") ? "left" : "right");
+    if (!this.isOpen && !words && tip) {
+      const t = document.createElement("span");
+      t.setAttribute("data-ecodrix-tip", "");
+      t.setAttribute("aria-hidden", "true");
+      t.textContent = tip;
+      this.bubble.appendChild(t);
     }
     const unread = this.isOpen ? 0 : this.unread;
     if (unread > 0) {
