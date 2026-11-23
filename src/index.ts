@@ -38,9 +38,11 @@
  *                                                  open): the frame goes live
  *   widget → frame  CLOSE                          the chat was hidden: replies
  *                                                  no longer count as read
- *   widget → frame  PAGE { path, title }           on open, on CONFIG and on
+ *   widget → frame  PAGE { path, title, dark }     on open, on CONFIG and on
  *                                                  popstate/hashchange; path
- *                                                  only (no query or hash)
+ *                                                  only (no query or hash);
+ *                                                  `dark`: the page's own
+ *                                                  background is dark (2.4)
  *
  * Facade (2.4): only the button (plain DOM) loads at first, from
  * `GET <api>/v1/api/infra/connect/webhooks/webchat/<code>/launcher` (plain `fetch`, cached 5 min in
@@ -289,6 +291,30 @@ export function readableOn(hex: string, min = 3): string {
   };
   const l = 0.2126 * ch(1) + 0.7152 * ch(3) + 0.0722 * ch(5);
   return 1.05 / (l + 0.05) >= min ? "#ffffff" : INK;
+}
+
+/**
+ * Is the host page dark? Its own background (body, else html) when it paints
+ * one; a transparent page falls back to the visitor's system setting. The
+ * frame uses it for the "auto" chat theme.
+ */
+export function pageIsDark(
+  bg: (el: Element) => string = (el) => getComputedStyle(el).backgroundColor,
+): boolean {
+  for (const el of [document.body, document.documentElement]) {
+    const m =
+      el && bg(el).match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?/);
+    if (!m) continue;
+    const alpha =
+      m[4] === undefined ? 1 : m[4].endsWith("%") ? Number.parseFloat(m[4]) / 100 : Number(m[4]);
+    if (alpha < 0.5) continue;
+    const ch = (v: string) => {
+      const c = Number(v) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * ch(m[1]) + 0.7152 * ch(m[2]) + 0.0722 * ch(m[3]) < 0.2;
+  }
+  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 /** Is `path` one of `hidden` (or below one)? `/checkout` hides `/checkout/pay`. */
@@ -1130,6 +1156,7 @@ export class ECODrIxWidget {
       type: "PAGE",
       path: window.location.pathname.slice(0, 200),
       title: document.title.slice(0, 120),
+      dark: pageIsDark(),
     });
   }
 

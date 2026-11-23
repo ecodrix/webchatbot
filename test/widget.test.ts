@@ -173,7 +173,7 @@ describe("OPEN and PAGE to the frame", () => {
     const { post, sent } = await loadAndSpy();
     fromFrame({ type: "CONFIG" });
     expect(post).toHaveBeenLastCalledWith(
-      { type: "PAGE", path: "/pricing", title: "Pricing" },
+      { type: "PAGE", path: "/pricing", title: "Pricing", dark: false },
       FRAME_ORIGIN,
     );
     widget().show();
@@ -181,7 +181,7 @@ describe("OPEN and PAGE to the frame", () => {
     window.history.replaceState({}, "", "/contact");
     window.dispatchEvent(new PopStateEvent("popstate"));
     expect(post).toHaveBeenLastCalledWith(
-      { type: "PAGE", path: "/contact", title: "Pricing" },
+      { type: "PAGE", path: "/contact", title: "Pricing", dark: false },
       FRAME_ORIGIN,
     );
     window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -751,5 +751,18 @@ describe("avoidSelectors", () => {
     const out = cleanSelectors(["#a", ".b", "x{y}", "<z", "p".repeat(101), "#c", "#d", "#e", "#f"]);
     expect(out).toEqual(["#a", ".b", "#c", "#d", "#e"]);
     expect(cleanSelectors("nope")).toEqual([]);
+  });
+});
+
+describe("auto chat theme: is the website dark?", () => {
+  it("reads the page's own background; transparent falls to html, then to the system setting", async () => {
+    const { pageIsDark } = await import("../src/index");
+    const paint = (body: string, html: string) => (el: Element) =>
+      el === document.body ? body : html;
+    expect(pageIsDark(paint("rgb(17, 24, 39)", "rgba(0, 0, 0, 0)"))).toBe(true);
+    expect(pageIsDark(paint("rgb(255, 255, 255)", "rgb(0, 0, 0)"))).toBe(false);
+    expect(pageIsDark(paint("rgba(0, 0, 0, 0)", "rgb(10 10 10)"))).toBe(true);
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("dark") }));
+    expect(pageIsDark(paint("rgba(0, 0, 0, 0)", "transparent"))).toBe(true);
   });
 });
