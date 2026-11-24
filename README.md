@@ -51,6 +51,8 @@ nudge, pages where the chat stays away, and the chat window's name,
 greeting, theme and quick replies. The button stays hidden until those
 settings arrive (at most 3 seconds), so it never shows the wrong look.
 
+**Previews.** A page opened with `?erix_preview=1` shows no button and no chat: the ECODrIx Look tab frames your live site that way and draws the draft button itself.
+
 **Your own button.** Any element with `data-erix-open` opens the chat. Turn on
 "Use your own button" in Look to hide the floating button:
 

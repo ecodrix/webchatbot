@@ -390,6 +390,9 @@ export class ECODrIxWidget {
     // Already running (a second init, or the one-line tag plus init): one
     // button, one iframe.
     if (this.listeners) return;
+    // The console's Look preview frames this site with `?erix_preview=1` and
+    // draws the draft button itself: no button or frame here, or there'd be two.
+    if (new URLSearchParams(window.location.search).get("erix_preview") === "1") return;
     if (!this.config.botUrl) {
       throw new Error("[ECODrIx] Provide `clientCode` (recommended) or `botUrl`.");
     }

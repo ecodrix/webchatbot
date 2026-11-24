@@ -77,6 +77,17 @@ describe("one-line embed", () => {
     expect(bubble().getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("erix_preview=1 on the page: no button, no frame (the console draws the draft)", async () => {
+    window.history.replaceState(null, "", "/?erix_preview=1");
+    await load({ erix: "ACME" });
+    expect(bubbles()).toHaveLength(0);
+    expect(document.querySelector("iframe")).toBeNull();
+    window.history.replaceState(null, "", "/?erix_preview=0");
+    await load({ erix: "ACME" });
+    expect(bubbles()).toHaveLength(1);
+    window.history.replaceState(null, "", "/");
+  });
+
   it("without data-erix nothing starts; ECODrIx.init still works", async () => {
     await load({});
     expect(bubbles()).toHaveLength(0);
